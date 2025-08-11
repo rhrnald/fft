@@ -13,6 +13,7 @@ do {                                                                           \
 } while (0)
 
 void baseline_fft(float2* d_data, int N);
+void my_fft_original(float2* d_data, int N);
 template<int N> void my_fft(float2* d_data);
 
 void check_result(float2* ref, float2* test, int N) {
@@ -33,10 +34,10 @@ int main() {
     const int N = 1024;
     float2* h_input = (float2*)malloc(sizeof(float2) * N);
     for (int i = 0; i < N; ++i) {
-        // h_input[i].x = sinf(2 * M_PI * i / N); // real part
+        // h_input[i].x = sinf(2 * M_PI * i / 64); // real part
         // h_input[i].y = 0.0f;                   // imag part
-        h_input[i].x=i;
-        h_input[i].y=i;
+        h_input[i].x=i%64;
+        h_input[i].y=0;
     }
 
     float2 *d_baseline, *d_custom;
@@ -47,6 +48,7 @@ int main() {
     cudaMemcpy(d_custom, h_input, sizeof(float2) * N, cudaMemcpyHostToDevice);
 
     baseline_fft(d_baseline, N);
+    // my_fft_original(d_custom, N);
     my_fft<N>(d_custom);
 
     float2* h_baseline = (float2*)malloc(sizeof(float2) * N);
