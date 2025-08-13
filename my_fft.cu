@@ -2,6 +2,8 @@
 #include <cuComplex.h>
 #include <math.h>
 #include <stdio.h>
+#include <cooperative_groups/memcpy_async.h>
+#include <cuda/pipeline>
 
 #include <cuda.h>
 #include <mma.h>
@@ -260,7 +262,7 @@ __global__ void fft_kernel_radix4_matmul(cuFloatComplex* d_data) {
 
 __device__ __forceinline__
 void fill_reg_b(float b[], int stride,
-                int i_perm, int j_perm, int k,
+                int i_perm, int j_perm, int k, const cuFloatComplex* __restrict__ W_ptr,
                 bool inverse=false)
 {
     // b = [ w^ (i+i_perm) ( k + N(j+j_perm)) ] ^ T
@@ -287,7 +289,11 @@ void fill_reg_b(float b[], int stride,
     // }
     // return;
 
-    auto w = W(j*(k+stride*i),4*stride);
+    // auto w = W(j*(k+stride*i),4*stride);
+    // cuFloatComplex w = make_cuFloatComplex(0.0f, 0.0f);
+    int index = (16/stride)*((j*(k+stride*i))%(4*stride));
+    auto w = W_ptr[index];
+
     
     if((threadIdx.x/4) & 1) {
         b[0] = w.y;
@@ -306,36 +312,36 @@ void mma_m16n8k8_tf32_f32_rowcol(
     const float c[4],
     void *smem
 ){
-    float* _a = (float*)smem;
-    float* _b = _a + 16 * 8;
-    float* _c = _b + 8 * 8;
+    // float* _a = (float*)smem;
+    // float* _b = _a + 16 * 8;
+    // float* _c = _b + 8 * 8;
     
-    int tidx=threadIdx.x;
+    // int tidx=threadIdx.x;
 
-    _a[tidx % 4 +      (tidx/4 % 8) * 8]     = a[0];
-    _a[tidx % 4 +      (tidx/4 % 8 + 8) * 8] = a[1];
-    _a[tidx % 4 + 4 +  (tidx/4 % 8) * 8]     = a[2];
-    _a[tidx % 4 + 4 +  (tidx/4 % 8 + 8) * 8] = a[3];
+    // _a[tidx % 4 +      (tidx/4 % 8) * 8]     = a[0];
+    // _a[tidx % 4 +      (tidx/4 % 8 + 8) * 8] = a[1];
+    // _a[tidx % 4 + 4 +  (tidx/4 % 8) * 8]     = a[2];
+    // _a[tidx % 4 + 4 +  (tidx/4 % 8 + 8) * 8] = a[3];
 
-    _b[(tidx % 4) *8 + tidx/4] = b[0];
-    _b[(tidx % 4 + 4) *8 + tidx/4] = b[1];
+    // _b[(tidx % 4) *8 + tidx/4] = b[0];
+    // _b[(tidx % 4 + 4) *8 + tidx/4] = b[1];
 
-    __syncwarp();
+    // __syncwarp();
 
 
-    int j = tidx % 8;
-    for(int i=tidx / 8; i<16; i+=4) {
-        float sum=0;
-        for(int k=0; k<8;k++)
-            sum += _a[i*8 + k] * _b[k*8 + j];
-        _c[i*8+j] = sum;
-    }
-    __syncwarp();
+    // int j = tidx % 8;
+    // for(int i=tidx / 8; i<16; i+=4) {
+    //     float sum=0;
+    //     for(int k=0; k<8;k++)
+    //         sum += _a[i*8 + k] * _b[k*8 + j];
+    //     _c[i*8+j] = sum;
+    // }
+    // __syncwarp();
 
-    d[0] = _c[ (tidx%4) * 2 + (tidx/4) * 8];
-    d[1] = _c[ (tidx%4) * 2 + 1 + (tidx/4) * 8];
-    d[2] = _c[ (tidx%4) * 2 + (tidx/4) * 8 + 64];
-    d[3] = _c[ (tidx%4) * 2 + 1 + (tidx/4) * 8 + 64];
+    // d[0] = _c[ (tidx%4) * 2 + (tidx/4) * 8];
+    // d[1] = _c[ (tidx%4) * 2 + 1 + (tidx/4) * 8];
+    // d[2] = _c[ (tidx%4) * 2 + (tidx/4) * 8 + 64];
+    // d[3] = _c[ (tidx%4) * 2 + 1 + (tidx/4) * 8 + 64];
 
     // if(tidx==0) {
     //     printf("-------------\n");
@@ -361,16 +367,17 @@ void mma_m16n8k8_tf32_f32_rowcol(
     //     }
     //     printf("\n");
     // }
-    // asm volatile(
-    //     "mma.sync.aligned.m16n8k8.row.col.tf32.tf32.f32 "
-    //     "{%0, %1, %2, %3}, "        // D (also C)
-    //     "{%4, %5, %6, %7}, "        // A (tf32 in .b32 regs)
-    //     "{%8, %9}, "                // B (tf32 in .b32 regs)
-    //     "{%0, %1, %2, %3};\n"       // C
-    //     :  "+f"(d[0]), "+f"(d[1]), "+f"(d[2]), "+f"(d[3])
-    //     :  "r"(a_u32[0]), "r"(a_u32[1]), "r"(a_u32[2]), "r"(a_u32[3]),
-    //        "r"(b_u32[0]), "r"(b_u32[1])
-    // );
+    asm volatile(
+        "mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32 "
+        "{%0, %1, %2, %3}, "        // D (also C)
+        "{%4, %5, %6, %7}, "        // A (tf32 in .b32 regs)
+        "{%8, %9}, "                // B (tf32 in .b32 regs)
+        "{%10, %11, %12, %13};\n"       // C
+        :  "+f"(d[0]), "+f"(d[1]), "+f"(d[2]), "+f"(d[3])
+        :  "r"(*reinterpret_cast<uint32_t const *>(&a[0])), "r"(*reinterpret_cast<uint32_t const *>(&a[1])), "r"(*reinterpret_cast<uint32_t const *>(&a[2])), "r"(*reinterpret_cast<uint32_t const *>(&a[3])),
+           "r"(*reinterpret_cast<uint32_t const *>(&b[0])), "r"(*reinterpret_cast<uint32_t const *>(&b[1])), 
+           "r"(*reinterpret_cast<uint32_t const *>(&c[0])), "r"(*reinterpret_cast<uint32_t const *>(&c[1])), "r"(*reinterpret_cast<uint32_t const *>(&c[2])), "r"(*reinterpret_cast<uint32_t const *>(&c[3]))
+    );
 }
 
 template <typename T>
@@ -390,8 +397,13 @@ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     }
 }
 
+// __global__ void fft_kernel_radix4096_batch16(cuFloatComplex* d_data) {
+
+// }
+
 //d_data contain
-__global__ void fft_kernel_radix64_batch16(cuFloatComplex* d_data) {
+__global__ void fft_kernel_radix64_batch16(cuFloatComplex* d_data, const cuFloatComplex* __restrict__ W_64) {
+    auto block = cooperative_groups::this_thread_block();
     //Tensor core shape
     constexpr int m=16;
     constexpr int n=8;
@@ -409,12 +421,15 @@ __global__ void fft_kernel_radix64_batch16(cuFloatComplex* d_data) {
 
     //Registers for data
     cuFloatComplex reg[ept];
+    // cuFloatComplex reg_tmp[ept];
 
     //Registers for mma : d = a * b + zero;
     float reg_frag_a[m*k/warp_size];
     float reg_frag_b[k*n/warp_size];
     float reg_frag_zero[m*n/warp_size];
     float reg_frag_d[m*n/warp_size];
+
+    __shared__ cuFloatComplex s_data[ept*(warp_size+1)];
     
 
     for(int i=0; i < m*k/warp_size; i++) reg_frag_a[i]=0.0f;
@@ -422,13 +437,54 @@ __global__ void fft_kernel_radix64_batch16(cuFloatComplex* d_data) {
     for(int i=0; i < m*n/warp_size; i++) reg_frag_zero[i]=0.0f;
 
     int laneid = threadIdx.x;
-    if(laneid==0 || laneid==5 || laneid==10 || laneid==15) reg_frag_b[0]=1.0f;
-    if(laneid==16 || laneid==21 || laneid==26 || laneid==31) reg_frag_b[1]=1.0f;
+    int warp_id = blockIdx.x;
 
-    for(int i=0; i<ept; i++) reg[i] = d_data[reverse_2bit_groups( (laneid % radix) + (i%(N/radix)) * radix,6)+ (laneid / radix * N) + (i/ (N/radix)) * N * (warp_size/radix)];
+    // __shared__ cuFloatComplex W_64_shared[64];
+    // W_64_shared[laneid] = W_64[laneid];
+    // W_64_shared[laneid+warp_size] = W_64[laneid+warp_size];
+    // __syncthreads();
+
+    // if(laneid==0 || laneid==5 || laneid==10 || laneid==15) reg_frag_b[0]=1.0f;
+    // if(laneid==16 || laneid==21 || laneid==26 || laneid==31) reg_frag_b[1]=1.0f;
+
+    // for(int i=0; i<ept; i++) reg[i] = d_data[warp_id * N * batch + reverse_2bit_groups( (laneid % radix) + (i%(N/radix)) * radix,6)+ (laneid / radix * N) + (i/ (N/radix)) * N * (warp_size/radix)];
+    // for (int j=0; j<2; j++) {
+    //     for(int i=0; i<ept/4; i++) {
+    //         // d_data[warp_id * N * batch + laneid*16 + j*ept/2 * warp_size + 2*i]
+    //         // d_data[warp_id * N * batch + laneid*16 + j*ept/2 * warp_size + 2*i + 1]
+    //         int index = j*ept/2 + 8*(i%2) + i/2;
+    //         float4 tmp = reinterpret_cast<float4*>(d_data)[(warp_id * N * batch + laneid * (N/radix) + j*ept/2 * warp_size + 2*i)/2];
+    //         reg[index] = make_cuFloatComplex(tmp.x, tmp.y);
+    //         reg[index+4] = make_cuFloatComplex(tmp.z, tmp.w);
+    //     }
+    // }
+
+    // just for test
+    // for (int i=0; i<ept/2; i++) {
+    //     // cooperative_groups::memcpy_async(block, &s_data[i*(warp_size+1) + laneid], &d_data[warp_id * N * batch + i * warp_size + laneid], sizeof(cuFloatComplex));
+    //     float4 tmp = reinterpret_cast<float4*>(d_data)[(warp_id * N * batch + i * warp_size + laneid)/2];
+    //     reg[i] = make_cuFloatComplex(tmp.x, tmp.y);
+    //     reg[i+ept/2] = make_cuFloatComplex(tmp.z, tmp.w);
+    // }
+
+    // vectorized load
+    for (int i=0; i<ept; i++) {
+        // cooperative_groups::memcpy_async(block, &s_data[i*(warp_size+1) + laneid], &d_data[warp_id * N * batch + i * warp_size + laneid], sizeof(cuFloatComplex));
+        s_data[i*(warp_size+1) + laneid] = d_data[warp_id * N * batch + i * warp_size + laneid];
+    }
+    // cooperative_groups::wait(block);
+
+    __syncthreads();
+    // first half batch
+    for(int i=0; i<ept/2; i++) {
+        reg[i] = s_data[(laneid/2)*(warp_size+1) + reverse_2bit_groups(i, 4)+(ept/2)*(laneid%2)];
+        reg[i+ept/2] = s_data[(ept/2)*(warp_size+1) + (laneid/2)*(warp_size+1) + reverse_2bit_groups(i, 4)+(ept/2)*(laneid%2)];
+        // printf("tid: %d, i: %d, laneid: %d, reg[i]: %f %f, reg[i+ept/2]: %f %f\n", threadIdx.x, i, laneid, reg[i].x, reg[i].y, reg[i+ept/2].x, reg[i+ept/2].y);
+    }
+
     
     for(int i=0; i<iter; i++) {
-        const int stride = 1<<(i<<1);//stride^iter;
+        const int stride = 1<<(i<<1);//4^iter;
         for(int j=0; j<N/radix; j++) {
             reg_frag_a[0] = reg[j].x;
             reg_frag_a[1] = reg[j + N/radix].x;
@@ -444,7 +500,7 @@ __global__ void fft_kernel_radix64_batch16(cuFloatComplex* d_data) {
             int i_perm = (j / stride) % radix;
             int k = j % stride;
 
-            fill_reg_b(reg_frag_b, stride, i_perm, j_perm, k);
+            fill_reg_b(reg_frag_b, stride, i_perm, j_perm, k, W_64);
             // printf("%d %d %d %d %d : %f %f\n", threadIdx.x, stride, i_perm, j_perm, k, reg_frag_b[0], reg_frag_b[1]);
 
             mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b, reg_frag_zero, (void*)s);
@@ -483,37 +539,106 @@ __global__ void fft_kernel_radix64_batch16(cuFloatComplex* d_data) {
     //     __syncthreads(); // 모든 스레드가 같은 횟수로, 같은 자리에서
     // }
 
-    for(int i=0; i<ept; i++) d_data[i%(N/radix) + (i/ (N/radix)) * N * (warp_size/radix) + laneid * (N/radix)] = reg[i];
+    // for(int i=0; i<ept; i++) d_data[warp_id * N * batch + i%(N/radix) + (i/ (N/radix)) * N * (warp_size/radix) + laneid * (N/radix)] = reg[i];
     
+    // write to smem
+    for(int i=0; i<ept/2; i++) {
+        s_data[(warp_size+1)*(laneid/2) + 16*(laneid%2)+i] = reg[i];
+        s_data[(ept/2)*(warp_size+1) + (warp_size+1)*(laneid/2) + 16*(laneid%2)+i] = reg[i+ept/2];
+    }
+    __syncthreads();
+
+    // write to gmem
+    for(int i=0; i<ept; i++) d_data[warp_id * N * batch + laneid + i * warp_size] = s_data[i*(warp_size+1) + laneid];
+    // for(int i=0; i<ept/2; i++) {
+    //     reinterpret_cast<float4*>(d_data)[(warp_id * N * batch + laneid + i * warp_size)/2] = make_float4(reg[i].x, reg[i].y, reg[i+ept/2].x, reg[i+ept/2].y);
+    // }
+
 }
 
 
-void my_fft_original(cuFloatComplex* d_data, int N) {
+// void my_fft_original(cuFloatComplex* d_data, int N) {
+//     cudaEvent_t start, stop;
+//     CHECK_CUDA(cudaEventCreate(&start));
+//     CHECK_CUDA(cudaEventCreate(&stop));
+//     // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
+//     // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
+
+    
+//     fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
+//     fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
+//     fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
+//     fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
+//     fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
+//     fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
+
+//     // 타이머 시작
+//     CHECK_CUDA(cudaEventRecord(start));
+
+//     constexpr unsigned int warp_num=1;
+//     dim3 grid(32, warp_num);
+
+//     for(int i=0; i<1000; i++) {
+//         fft_kernel_radix4_matmul<256,warp_num><<<1, grid, N * sizeof(cuFloatComplex)>>>(d_data);
+//     }
+
+//     // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
+
+//     CHECK_CUDA(cudaEventRecord(stop));
+
+//     CHECK_CUDA(cudaDeviceSynchronize());
+//     CHECK_CUDA(cudaGetLastError());
+
+//     float milliseconds = 0.0f;
+//     CHECK_CUDA(cudaEventElapsedTime(&milliseconds, start, stop));
+
+//     printf("my_fft kernel execution time: %.3f ms\n", milliseconds);
+
+//     //debug
+//     cuFloatComplex* tmp = (cuFloatComplex*)malloc(N * sizeof(cuFloatComplex));
+//     if (!tmp) {
+//         fprintf(stderr, "Host malloc failed\n");
+//         return;
+//     }
+
+//     // GPU → CPU 복사
+//     CHECK_CUDA(cudaMemcpy(tmp, d_data, N * sizeof(cuFloatComplex), cudaMemcpyDeviceToHost));
+
+//     // for (int i = 0; i < 16; i++) {
+//     //     for (int j = 0; j < 64; j++) {
+//     //         printf("(%.2f, %.2f) ", tmp[i * 64 + j].x, tmp[i * 64 + j].y);
+//     //     }
+//     //     printf("\n");
+//     // }
+// }
+template<int N>
+void my_fft(cuFloatComplex* d_data) {
+    // fft_kernel<<<1, N/2, N * sizeof(cuFloatComplex)>>>(d_data, N);
+    // fft_kernel_radix4<<<1, N/4, N * sizeof(cuFloatComplex)>>>(d_data, N);
+
+
     cudaEvent_t start, stop;
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
-    // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-    // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
 
-    
-    fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-    fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-    fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-    fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-    fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-    fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
+    cuFloatComplex h_W_64[64];
+
+    for(int i=0; i<64; i++) {
+        h_W_64[i] = make_cuFloatComplex(cosf(-2*M_PI*i/64), sinf(-2*M_PI*i/64));
+    }
+
+    cuFloatComplex *W_64;
+    CHECK_CUDA(cudaMalloc(&W_64, 64 * sizeof(cuFloatComplex)));
+    CHECK_CUDA(cudaMemcpy(W_64, h_W_64, 64 * sizeof(cuFloatComplex), cudaMemcpyHostToDevice));
 
     // 타이머 시작
     CHECK_CUDA(cudaEventRecord(start));
 
-    constexpr unsigned int warp_num=1;
-    dim3 grid(32, warp_num);
+    // constexpr unsigned int warp_num=1;
+    // dim3 grid(32, warp_num);
+    // fft_kernel_radix4_matmul<N,warp_num><<<1, grid, N * sizeof(cuFloatComplex)>>>(d_data);
 
-    for(int i=0; i<1000; i++) {
-        fft_kernel_radix4_matmul<256,warp_num><<<1, grid, N * sizeof(cuFloatComplex)>>>(d_data);
-    }
-
-    // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
+    fft_kernel_radix64_batch16<<<N/1024, 32>>>(d_data, W_64);
 
     CHECK_CUDA(cudaEventRecord(stop));
 
@@ -542,66 +667,16 @@ void my_fft_original(cuFloatComplex* d_data, int N) {
     //     printf("\n");
     // }
 }
-template<int N>
-void my_fft(cuFloatComplex* d_data) {
-    // fft_kernel<<<1, N/2, N * sizeof(cuFloatComplex)>>>(d_data, N);
-    // fft_kernel_radix4<<<1, N/4, N * sizeof(cuFloatComplex)>>>(d_data, N);
-
-
-    cudaEvent_t start, stop;
-    CHECK_CUDA(cudaEventCreate(&start));
-    CHECK_CUDA(cudaEventCreate(&stop));
-    // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-    // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-
-    
-    // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-    // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-    // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-    // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-    // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-    // fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-
-    // 타이머 시작
-    CHECK_CUDA(cudaEventRecord(start));
-
-    // constexpr unsigned int warp_num=1;
-    // dim3 grid(32, warp_num);
-    // fft_kernel_radix4_matmul<N,warp_num><<<1, grid, N * sizeof(cuFloatComplex)>>>(d_data);
-
-    fft_kernel_radix64_batch16<<<1, 32, N * sizeof(cuFloatComplex)>>>(d_data);
-
-    CHECK_CUDA(cudaEventRecord(stop));
-
-    CHECK_CUDA(cudaDeviceSynchronize());
-    CHECK_CUDA(cudaGetLastError());
-
-    float milliseconds = 0.0f;
-    CHECK_CUDA(cudaEventElapsedTime(&milliseconds, start, stop));
-
-    printf("my_fft kernel execution time: %.3f ms\n", milliseconds);
-
-    //debug
-    cuFloatComplex* tmp = (cuFloatComplex*)malloc(N * sizeof(cuFloatComplex));
-    if (!tmp) {
-        fprintf(stderr, "Host malloc failed\n");
-        return;
-    }
-
-    // GPU → CPU 복사
-    CHECK_CUDA(cudaMemcpy(tmp, d_data, N * sizeof(cuFloatComplex), cudaMemcpyDeviceToHost));
-
-    for (int i = 0; i < 16; i++) {
-        for (int j = 0; j < 64; j++) {
-            printf("(%.2f, %.2f) ", tmp[i * 64 + j].x, tmp[i * 64 + j].y);
-        }
-        printf("\n");
-    }
-}
 
 void a() {
     cuFloatComplex* tmp=nullptr;
     my_fft<16>(tmp);
     my_fft<1024>(tmp);
+    my_fft<2048>(tmp);
     my_fft<4096>(tmp);
+    my_fft<16384>(tmp);
+    my_fft<64*16*200>(tmp);
+    my_fft<64*16*2000>(tmp);
+    my_fft<64*16*65536>(tmp);
+    my_fft<64*16*131072>(tmp);
 }
