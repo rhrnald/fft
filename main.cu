@@ -1,20 +1,8 @@
-#include <stdio.h>
-#include <cuda_runtime.h>
 #include <math.h>
-
-#define CHECK_CUDA(call)                                                       \
-do {                                                                           \
-    cudaError_t err = call;                                                    \
-    if (err != cudaSuccess) {                                                  \
-        fprintf(stderr, "CUDA error in %s (%s:%d): %s\n",                      \
-                #call, __FILE__, __LINE__, cudaGetErrorString(err));           \
-        exit(EXIT_FAILURE);                                                    \
-    }                                                                          \
-} while (0)
+#include "my_fft.h"
 
 void baseline_fft(float2* d_data, int N);
 void my_fft_original(float2* d_data, int N);
-template<int N> void my_fft(float2* d_data);
 
 void check_result(float2* ref, float2* test, int N) {
     float max_err = 0.0f;
@@ -31,7 +19,14 @@ void check_result(float2* ref, float2* test, int N) {
 }
 
 int main() {
-    const int N = 1024;
+    const int N = 64*16*65536;
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+
+    printf("Max grid size: x=%d, y=%d, z=%d\n",
+           prop.maxGridSize[0],
+           prop.maxGridSize[1],
+           prop.maxGridSize[2]);
     float2* h_input = (float2*)malloc(sizeof(float2) * N);
     for (int i = 0; i < N; ++i) {
         // h_input[i].x = sinf(2 * M_PI * i / 64); // real part

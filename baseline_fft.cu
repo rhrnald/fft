@@ -24,8 +24,19 @@ do {                                                                           \
 
 void baseline_fft(float2* d_data, int N) {
     cufftHandle plan;
-    cufftPlan1d(&plan, N, CUFFT_C2C, 1);
+    cufftPlan1d(&plan, 64, CUFFT_C2C, N/64);
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
     cufftExecC2C(plan, (cufftComplex*)d_data, (cufftComplex*)d_data, CUFFT_FORWARD);
+    cudaEventRecord(stop);
+    cudaDeviceSynchronize();
+    float elapsedTime;
+    cudaEventElapsedTime(&elapsedTime, start, stop);
+    printf("Baseline FFT Time taken: %f ms\n", elapsedTime);
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
     // cufftExecC2C(plan, (cufftComplex*)d_data, (cufftComplex*)d_data, CUFFT_INVERSE);
     cufftDestroy(plan);
 }
