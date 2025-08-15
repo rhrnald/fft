@@ -24,7 +24,7 @@ do {                                                                           \
 
 void baseline_fft(float2* d_data, int N) {
     cufftHandle plan;
-    cufftPlan1d(&plan, 64, CUFFT_C2C, N/64);
+    cufftPlan1d(&plan, 4096, CUFFT_C2C, N/4096);
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);

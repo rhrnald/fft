@@ -14,6 +14,7 @@ do {                                                                           \
 } while (0)
 
 __global__ void fft_kernel_radix64_batch16(cuFloatComplex* d_data, const cuFloatComplex* __restrict__ W_64);
+__global__ void fft_kernel_radix4096_batch1(cuFloatComplex* d_data, const cuFloatComplex* __restrict__ W_64);
 
 template<int N>
 void my_fft(cuFloatComplex* d_data) {
@@ -42,7 +43,7 @@ void my_fft(cuFloatComplex* d_data) {
     // dim3 grid(32, warp_num);
     // fft_kernel_radix4_matmul<N,warp_num><<<1, grid, N * sizeof(cuFloatComplex)>>>(d_data);
 
-    fft_kernel_radix64_batch16<<<N/1024, 32>>>(d_data, W_64);
+    fft_kernel_radix4096_batch1<<<N/4096, 128>>>(d_data, W_64);
 
     CHECK_CUDA(cudaEventRecord(stop));
 
