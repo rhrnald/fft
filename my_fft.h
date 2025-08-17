@@ -14,9 +14,9 @@ do {                                                                           \
 } while (0)
 
 __global__ void fft_kernel_radix64_batch16(cuFloatComplex* d_data, const cuFloatComplex* __restrict__ W_64);
-__global__ void fft_kernel_radix4096_batch1(cuFloatComplex* d_data, const cuFloatComplex* __restrict__ W_64);
+__global__ void fft_kernel_radix4096_batch1(cuFloatComplex* d_data, const cuFloatComplex* W_4096);
 
-template<int N>
+template<long long N>
 void my_fft(cuFloatComplex* d_data) {
     // fft_kernel<<<1, N/2, N * sizeof(cuFloatComplex)>>>(d_data, N);
     // fft_kernel_radix4<<<1, N/4, N * sizeof(cuFloatComplex)>>>(d_data, N);
@@ -27,14 +27,19 @@ void my_fft(cuFloatComplex* d_data) {
     CHECK_CUDA(cudaEventCreate(&stop));
 
     cuFloatComplex h_W_64[64];
-
+    cuFloatComplex h_W_4096[4096];
     for(int i=0; i<64; i++) {
         h_W_64[i] = make_cuFloatComplex(cosf(-2*M_PI*i/64), sinf(-2*M_PI*i/64));
     }
+    for(int i=0; i<4096; i++) {
+        h_W_4096[i] = make_cuFloatComplex(cos((-2*M_PI*i)/4096.0), sin((-2*M_PI*i)/4096.0));
+    }
 
-    cuFloatComplex *W_64;
+    cuFloatComplex *W_64, *W_4096;
     CHECK_CUDA(cudaMalloc(&W_64, 64 * sizeof(cuFloatComplex)));
+    CHECK_CUDA(cudaMalloc(&W_4096, 4096 * sizeof(cuFloatComplex)));
     CHECK_CUDA(cudaMemcpy(W_64, h_W_64, 64 * sizeof(cuFloatComplex), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(W_4096, h_W_4096, 4096 * sizeof(cuFloatComplex), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaDeviceSynchronize());
     // 타이머 시작
     CHECK_CUDA(cudaEventRecord(start));
@@ -43,7 +48,7 @@ void my_fft(cuFloatComplex* d_data) {
     // dim3 grid(32, warp_num);
     // fft_kernel_radix4_matmul<N,warp_num><<<1, grid, N * sizeof(cuFloatComplex)>>>(d_data);
 
-    fft_kernel_radix4096_batch1<<<N/4096, 128>>>(d_data, W_64);
+    fft_kernel_radix4096_batch1<<<N/4096, dim3(32, 4)>>>(d_data, W_4096);
 
     CHECK_CUDA(cudaEventRecord(stop));
 

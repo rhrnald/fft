@@ -19,7 +19,7 @@ void check_result(float2* ref, float2* test, int N) {
 }
 
 int main() {
-    const int N = 64*16*65536;
+    const long long N = 4096*65536;
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
 
