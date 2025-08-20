@@ -10,7 +10,7 @@ bool validate(float *ref, float *target, int out_size, const char *tag) {
   for (int i = 0; i < out_size*out_size; ++i) {
     float diff = fabs(ref[i] - target[i]);
     if (diff > 1e-1f) {
-      if (++errors <= 10000)
+      if (++errors <= 5)
         printf("[Mismatch:%s] idx=%d,%d ref=%.3f target=%.3f\n", tag, i/out_size, i%out_size, ref[i],
                target[i]);
     }
@@ -19,7 +19,7 @@ bool validate(float *ref, float *target, int out_size, const char *tag) {
     printf("[%s] Validation PASSED\n", tag);
     return true;
   } else {
-    printf("[%s] Validation FAILED with %d / %d mismatches\n", tag, errors, out_size*out_size);
+    printf("[%s] Validation FAILED with %d / %d mismatches (%.1f %%)n", tag, errors, out_size*out_size, 100.0*errors/out_size/out_size);
     return false;
   }
 }
