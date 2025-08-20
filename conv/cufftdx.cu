@@ -17,7 +17,7 @@
 
 using namespace cufftdx;
 
-static constexpr unsigned int tile_size = 128;
+static constexpr unsigned int tile_size = 64;
 
 template <typename real_type, class fft_r2c, class fft_c2r,
           class fft_c2c_forward, class fft_c2c_inverse, class fft_single>
@@ -37,7 +37,7 @@ __global__ void conv_kernel(real_type *d_input,
   complex_type *shared_buffer = shared;
   complex_type *tile =
       shared + (fft_c2c_forward::shared_memory_size / sizeof(complex_type));
-  float *real_tile = reinterpret_cast<float *>(tile);
+  // float *real_tile = reinterpret_cast<float *>(tile);
   // complex_type* tile = shared;
   // complex_type* shared_buffer = shared+tile_size*(tile_size/2+1);
 
@@ -87,16 +87,7 @@ __global__ void conv_kernel(real_type *d_input,
     }
   }
 
-  // if(local_thread_id==0 && local_fft_id==0) {
-  //   for(int i=0 ; i<tile_size;i++) {
-  //     for (int j = 0; j <=tile_size/2; j++) {
-  //       printf("%f %f ", tile[i*(tile_size/2+1)+j].x,
-  //       tile[i*(tile_size/2+1)+j].y);
-  //     }
-  //     printf("\n");
-  //   }
-  //   printf("\n\n");
-  // }
+
 
   __syncthreads();
   // c2c forward & backward
@@ -115,18 +106,18 @@ __global__ void conv_kernel(real_type *d_input,
     fft_c2c_forward().execute(thread_data, shared_buffer);
 
     // element wise mult
-    if (col < tile_size / 2 + 1) {
-      for (int i = 0; i < fft_c2c_forward::elements_per_thread; i++) {
-        thread_data[i] =
-            thread_data[i] *
-            d_filter[(local_thread_id + fft_c2c_forward::stride * i) *
-                         (tile_size / 2 + 1) +
-                     col];
-      }
-    }
+    // if (col < tile_size / 2 + 1) {
+    //   for (int i = 0; i < fft_c2c_forward::elements_per_thread; i++) {
+    //     thread_data[i] =
+    //         thread_data[i] *
+    //         d_filter[(local_thread_id + fft_c2c_forward::stride * i) *
+    //                      (tile_size / 2 + 1) +
+    //                  col];
+    //   }
+    // }
 
     // fft
-    fft_c2c_inverse().execute(thread_data, shared_buffer);
+    // fft_c2c_inverse().execute(thread_data, shared_buffer);
 
     // register -> smem
     if (col < tile_size / 2 + 1) {
@@ -139,6 +130,17 @@ __global__ void conv_kernel(real_type *d_input,
     }
   }
   __syncthreads();
+
+  // if(local_thread_id==0 && local_fft_id==0) {
+  //   for(int i=0 ; i<tile_size;i++) {
+  //     for (int j = 0; j <=tile_size/2; j++) {
+  //       printf("%f %f ", tile[i*(tile_size/2+1)+j].x,
+  //       tile[i*(tile_size/2+1)+j].y);
+  //     }
+  //     printf("\n");
+  //   }
+  //   printf("\n\n");
+  // }
 
   for (int j = 0; j < (valid_tile_size - 1) / fpb + 1; j++) {
     int local_row = local_fft_id + fpb * j;

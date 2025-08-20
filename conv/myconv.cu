@@ -1,4 +1,6 @@
 #include "gpuTimer.h"
+#include "my_fft.h"
+
 #include <cufft.h>
 #include <cufftdx.hpp>
 #include <typeinfo>
@@ -19,103 +21,138 @@ using namespace cufftdx;
 
 static constexpr unsigned int tile_size = 64;
 
-__global__ void conv_kernel(real_type *d_input,
-                            cufftdx::complex<real_type> *d_filter,
-                            real_type *d_output, int N, int f) {
-  using complex_type = typename cufftdx::complex<real_type>;
+__global__ void my_conv_kernel(float *d_input,
+                            cufftdx::complex<float> *d_filter,
+                            float *d_output, int input_size, int f, const cuFloatComplex *W_4096, const cuFloatComplex *IW_4096) {
+  using complex_type = typename cufftdx::complex<float>;
 
   // Allocate register
   float2 thread_data[32];
-  extern __shared__ __align__(alignof(float4)) complex_type tile[];
+  __shared__ __align__(alignof(float4)) float2 tile[tile_size*(tile_size/2+1)];
 
   // thread idx
+  const int lane_id = threadIdx.x;
+  const int warp_id = threadIdx.y;
   const int local_thread_id = threadIdx.x;
   const int local_fft_id = threadIdx.y;
 
-  const int input_size = N;
-  const int output_size = N - f + 1;
+  const int output_size = input_size - f + 1;
   const int valid_tile_size = tile_size - f + 1;
 
-  const int input_data_bias = (blockIdx.x + blockIdx.y * N) * valid_tile_size;
+  const int input_data_bias = (blockIdx.x + blockIdx.y * input_size) * valid_tile_size;
   const int output_data_bias =
       (blockIdx.x + blockIdx.y * output_size) * valid_tile_size;
 
-  // r2c
-  // for (int j = 0; j < (tile_size - 1) / fpb + 1; j++) {
-  //   int local_row = local_fft_id + fpb * j;
-  //   int global_row = local_row + blockIdx.y * valid_tile_size;
+  // gmem -> smem
+  for (int local_row = warp_id; local_row < tile_size; local_row+=blockDim.y) {
+    int global_row = local_row + blockIdx.y * valid_tile_size;
 
-  //   if (local_row < tile_size) {
-  //     auto d_input_asComplex = reinterpret_cast<complex_type *>(
-  //         d_input + input_data_bias + local_row * input_size);
-  //     for (int col = 0; col < tile_size / 2; col++) {
-  //       if (global_row < input_size &&
-  //           col * 2 + blockIdx.x * valid_tile_size < input_size)
-  //         tile[col + (tile_size / 2 + 1) * local_row] =
-  //         d_input_asComplex[col];
-  //       else
-  //         tile[col + (tile_size / 2 + 1) * local_row] = complex_type(0, 0);
-  //     }
-  //   }
-  // }
+    int local_col = lane_id;
+    int global_col = local_col*2+blockIdx.x * valid_tile_size;
 
-  // row-wise fft * 64
-  // ...
+    if(global_row < input_size && global_col < input_size) {
+      tile[local_col + (tile_size / 2 + 1) * local_row] = *reinterpret_cast<float2 *>(d_input+global_row * input_size + global_col);
+    } else {
+      tile[local_col + (tile_size / 2 + 1) * local_row] = make_float2(0.0f, 0.0f);
+    }
+  }
+
 
   __syncthreads();
-  // c2c forward & backward
-  // for (int j = 0; j < (tile_size / 2 + 1 - 1) / fpb + 1; j++) { // 17->16
-  //   int col = local_fft_id + fpb * j;
-  //   // smem -> register
-  //   if (col < tile_size / 2 + 1) {
-  // }
 
-  //   // fft
-  //   ...
+  // row-wise fft
+  for(int i=0; i<32; i++) {
+    int row = lane_id/4 + (i/16)*8 + warp_id*16;
+    int col = lane_id%4 + (i%16)*4;
+    thread_data[i].x = *(((float*)tile) +row*(tile_size + 2)+reverse_2bit_groups(col,6));
+    thread_data[i].y = 0.0f;
+  }
 
-  //       // element wise mult
-  //       if (col < tile_size / 2 + 1) {
-  //     for (int i = 0; i < 128; i++) {
-  //       thread_data[i] =
-  //           thread_data[i] * d_filter[row * (tile_size / 2 + 1) + col];
-  //     }
-  //   }
+  fft_kernel_r64_b16((cuFloatComplex *)thread_data, W_4096);
 
-  //   // fft
-  //   ...
+  for(int i=0; i<32; i++) {
+    int row = (lane_id/4) + (i/16)*8 + warp_id*16;
+    int col = (lane_id%4) * 16 + (i%16);
+    if(col<tile_size/2+1) {
+      tile[row * (tile_size/2+1) + col] = thread_data[i];
+    }
+  }
+  __syncthreads();
 
-  //       // register -> smem
-  //       if (col < tile_size / 2 + 1) {
-  //     ...
-  //   }
-  // }
-  // __syncthreads();
+  // col-wise fft
+  for(int i=0; i<32; i++) {
+    int col = lane_id/4 + (i/16)*8 + warp_id*16;
+    int row = lane_id%4 + (i%16)*4;
+    if(col<tile_size/2+1) {
+      thread_data[i] = tile[reverse_2bit_groups(row,6) * (tile_size/2+1) + col];
+    }
+  }
 
-  // for (int j = 0; j < (valid_tile_size - 1) / fpb + 1; j++) {
-  //   int local_row = local_fft_id + fpb * j;
-  //   int global_row = local_row + blockIdx.y * valid_tile_size;
-  //   // register -> smem;
-  //   if (local_row < valid_tile_size && global_row < output_size) {
-  //     ...
-  //   }
+  if(warp_id<4) fft_kernel_r64_b16((cuFloatComplex *)thread_data, W_4096);
 
-  //   // fft
-  //   ...
+  for(int i=0; i<32; i++) {
+    int col = (lane_id/4) + (i/16)*8 + warp_id*16;
+    int row = (lane_id%4) * 16 + (i%16);
+    if(col<tile_size/2+1) {
+      tile[row * (tile_size/2+1) + col] = thread_data[i];
+    }
+  }
 
-  //       // register -> global mem
-  //       if (local_row < valid_tile_size && global_row < output_size) {
-  //     auto d_output_asComplex = reinterpret_cast<complex_type *>(
-  //         d_output + output_data_bias + local_row * output_size);
-  //     for (int i = 0; i < (tile_size / 2 + 1 - 1) / fft_r2c::stride + 1; i++)
-  //     {
-  //       int local_col = local_thread_id + fft_r2c::stride * i;
-  //       int global_col = local_col * 2 + blockIdx.x * valid_tile_size;
-  //       if (local_col < valid_tile_size / 2 && global_col < output_size) {
-  //         d_output_asComplex[local_col] = .....;
-  //       }
-  //     }
-  //   }
-  // }
+  //element-wise mult
+
+  
+  __syncthreads();
+  // col-wise ifft
+  for(int i=0; i<32; i++) {
+    int col = lane_id/4 + (i/16)*8 + warp_id*16;
+    int row = lane_id%4 + (i%16)*4;
+    if(col<tile_size/2+1) {
+      thread_data[i] = tile[reverse_2bit_groups(row,6) * (tile_size/2+1) + col];
+    }
+  }
+
+  if(warp_id<3) fft_kernel_r64_b16((cuFloatComplex *)thread_data, IW_4096);
+
+  for(int i=0; i<32; i++) {
+    int col = (lane_id/4) + (i/16)*8 + warp_id*16;
+    int row = (lane_id%4) * 16 + (i%16);
+    if(col<tile_size/2+1) {
+      tile[row * (tile_size/2+1) + col] = thread_data[i];
+    }
+  }
+
+  __syncthreads();
+  // row-wise ifft
+
+  for(int i=0; i<32; i++) {
+    int col = lane_id/4 + (i/16)*8 + warp_id*16;
+    int row = lane_id%4 + (i%16)*4;
+    if(col<tile_size/2+1) {
+      thread_data[i] = tile[reverse_2bit_groups(row,6) * (tile_size/2+1) + col];
+    } else {
+      thread_data[i] = tile[reverse_2bit_groups(row,6) * (tile_size/2+1) + tile_size-col];
+      thread_data[i].y = -thread_data[i].y;
+    }
+  }
+
+  fft_kernel_r64_b16((cuFloatComplex *)thread_data, IW_4096);
+
+  for(int i=0; i<32; i++) {
+    int col = (lane_id/4) + (i/16)*8 + warp_id*16;
+    int row = (lane_id%4) * 16 + (i%16);
+    *(((float*)tile) +row*(tile_size + 2)+col) = thread_data[i].x;
+  }
+
+  if(local_thread_id==0 && local_fft_id==0) {
+    for(int i=0 ; i<tile_size;i++) {
+      for (int j = 0; j <=tile_size/2; j++) {
+        printf("%f %f ", tile[i*(tile_size/2+1)+j].x/64/64,
+        tile[i*(tile_size/2+1)+j].y/64/64);
+      }
+      printf("\n");
+    }
+    printf("\n\n");
+  }
 }
 
 template <class FFT> void print_FFT_info() {
@@ -132,24 +169,39 @@ template <class FFT> void print_FFT_info() {
 }
 
 template <typename real_type>
-void FFTconv_my(real_type *d_input, cufftdx::complex<real_type> *d_filter,
+void my_FFTconv(real_type *d_input, cufftdx::complex<real_type> *d_filter,
                 real_type *d_output, int N, int f) {
   using complex_type = cufftdx::complex<real_type>;
-  constexpr size_t total_shared_mem =
-      sizeof(complex_type) * tile_size * (tile_size / 2 + 1);
-  cudaFuncSetAttribute(conv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
-                       total_shared_mem);
+  // constexpr size_t total_shared_mem =
+  //     sizeof(complex_type) * tile_size * (tile_size / 2 + 1);
+  // cudaFuncSetAttribute(my_conv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+  //                      total_shared_mem);
 
+  cuFloatComplex h_W_4096[4096], h_IW_4096[4096];
+  for (int i = 0; i < 4096; i++) {
+    h_W_4096[i] = make_cuFloatComplex(cos((-2 * M_PI * i) / 4096.0),
+                                      sin((-2 * M_PI * i) / 4096.0));
+    
+    h_IW_4096[i] = make_cuFloatComplex(cos((-2 * M_PI * i) / 4096.0),
+                                      -sin((-2 * M_PI * i) / 4096.0));
+  }
+
+  cuFloatComplex *W_4096, *IW_4096;
+  CHECK_CUDA(cudaMalloc(&W_4096, 4096 * sizeof(cuFloatComplex)));
+  CHECK_CUDA(cudaMemcpy(W_4096, h_W_4096, 4096 * sizeof(cuFloatComplex),
+                        cudaMemcpyHostToDevice));
+
+  CHECK_CUDA(cudaMalloc(&IW_4096, 4096 * sizeof(cuFloatComplex)));
+  CHECK_CUDA(cudaMemcpy(IW_4096, h_IW_4096, 4096 * sizeof(cuFloatComplex),
+                        cudaMemcpyHostToDevice));
+  
   int tile_num = (N + tile_size - f - f + 1) / (tile_size - f + 1);
   dim3 tile_grid(tile_num, tile_num);
   GpuTimer timer;
   timer.Start();
-  // shrinkage_kernel<real_type, fft_r2c, fft_c2r, fft_c2c_forward,
-  //                   fft_c2c_inverse,fft_single><<<tile_num*tile_num,
-  //                   fft_r2c::block_dim, total_shared_mem>>>(
-  //     d_input, d_filter, d_output, N, f);
-  conv_kernel<<<tile_grid, 128, total_shared_mem>>>(d_input, d_filter, d_output,
-                                                    N, f);
+  dim3 block_dim(32,4);
+  my_conv_kernel<<<tile_grid, block_dim>>>(d_input, d_filter, d_output,
+                                                    N, f, W_4096, IW_4096);
   timer.Stop();
 
   // dim3 tmp={8,1};
@@ -169,7 +221,7 @@ void FFTconv_my(real_type *d_input, cufftdx::complex<real_type> *d_filter,
       static_cast<long long>(tiles_per_dim) * tiles_per_dim * ops_per_tile;
   float gflops = total_ops / (time_ms * 1e6f);
 
-  printf("[cuFFTDx] Time: %.3f ms, GFLOPS: %.2f\n", time_ms, gflops);
+  printf("[myConv] Time: %.3f ms, GFLOPS: %.2f\n", time_ms, gflops);
 
   // static float total_time=0;
   // static int cnt=0;
@@ -212,7 +264,7 @@ cufftdx::complex<real_type> *preprocess_filter(real_type *h_filter, int f,
   return reinterpret_cast<cufftdx::complex<real_type> *>(d_filter_fft);
 }
 
-void convolution_my(float *h_input, float *h_filter, float *h_output, int N,
+void my_convolution(float *h_input, float *h_filter, float *h_output, int N,
                     int f) {
   float *d_input, *d_output;
   int out_size = N - f + 1;
@@ -224,7 +276,7 @@ void convolution_my(float *h_input, float *h_filter, float *h_output, int N,
   cudaMemcpy(d_input, h_input, N * N * sizeof(float), cudaMemcpyHostToDevice);
   auto d_filter = preprocess_filter(h_filter, f, tile_size);
 
-  FFTconv_my<float>(d_input, d_filter, d_output, N, f);
+  my_FFTconv<float>(d_input, d_filter, d_output, N, f);
 
   // Copy result back to host
   checkCuda(cudaMemcpy(h_output, d_output, out_size * out_size * sizeof(float),

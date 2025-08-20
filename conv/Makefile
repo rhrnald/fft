@@ -1,6 +1,6 @@
 # Makefile for cuFFT, cuDNN, cuFFTDx convolution comparison
-HOME_DIR = /home/s6/chaewon2/
-ARCH_NO=70
+HOME_DIR = /home/chaewon/
+ARCH_NO=80
 
 # Paths
 MATHDX_ROOT = $(HOME_DIR)/install/nvidia-mathdx-25.06.0/nvidia/mathdx/25.06
@@ -10,7 +10,7 @@ NVCC = nvcc
 TARGET = conv_compare
 
 # Source files
-SRCS = main.cu conv_naive.cpp cudnn.cu cufft.cu cufftdx.cu
+SRCS = main.cu conv_naive.cpp cudnn.cu cufft.cu cufftdx.cu myconv.cu
 OBJS = $(SRCS:.cu=.o)
 
 # Flags

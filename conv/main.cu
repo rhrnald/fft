@@ -56,6 +56,7 @@ int main(int argc, char **argv) {
   float *output_cufft_tiled =
       (float *)malloc(sizeof(float) * out_size * out_size);
   float *output_cufftdx = (float *)malloc(sizeof(float) * out_size * out_size);
+  float *output_my = (float *)malloc(sizeof(float) * out_size * out_size);
 
   initialize_with_gaussian(input, N * N);
   initialize_with_gaussian(filter, f * f);
@@ -65,20 +66,23 @@ int main(int argc, char **argv) {
   // Each function handles its own timing & FLOP reporting
   // printf("running naive\n");
   // convolution_naive(input, filter, output_naive, N, f);
-  // convolution_cudnn(input, filter, output_cudnn, N, f);
+  convolution_cudnn(input, filter, output_cudnn, N, f);
   convolution_cufft(input, filter, output_cufft, N, f);
   convolution_cufft_tiled(input, filter, output_cufft_tiled, N, f, T);
   // for(int i=0;i<100;i++)
   convolution_cufftdx(input, filter, output_cufftdx, N, f); // tiled
+  my_convolution(input, filter, output_my, N, f); // tiled
 
   // Validation
   // validate(output_naive, output_cudnn, out_size * out_size, "cuDNN");
   // validate(output_cudnn, output_cufft, out_size * out_size, "cuDNN vs
   // cuFFT");
-  validate(output_cufft, output_cufft_tiled, out_size * out_size,
-           "cuFFT vs cuFFT Tiled");
-  validate(output_cufft, output_cufftdx, out_size * out_size,
-           "cuFFT vs cuFFTdx");
+  validate(output_cudnn, output_cufft_tiled, out_size * out_size,
+           "cuDNN vs cuFFT Tiled");
+  validate(output_cudnn, output_cufftdx, out_size * out_size,
+           "cuDNN vs cuFFTdx");
+  validate(output_cudnn, output_my, out_size * out_size,
+           "cuDNN vs my");
 
   // for(int i=0; i<out_size; i++) {
   //     for(int j=0; j<out_size; j++)
