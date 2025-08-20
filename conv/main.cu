@@ -76,9 +76,9 @@ int main(int argc, char **argv) {
   // validate(output_cudnn, output_cufft, out_size * out_size, "cuDNN vs
   // cuFFT");
   validate(output_cufft, output_cufft_tiled, out_size * out_size,
-           "cuDNN vs cuFFT Tiled");
+           "cuFFT vs cuFFT Tiled");
   validate(output_cufft, output_cufftdx, out_size * out_size,
-           "cuDNN vs cuFFTdx");
+           "cuFFT vs cuFFTdx");
 
   // for(int i=0; i<out_size; i++) {
   //     for(int j=0; j<out_size; j++)

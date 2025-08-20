@@ -17,7 +17,7 @@
 
 using namespace cufftdx;
 
-static constexpr unsigned int tile_size = 64;
+static constexpr unsigned int tile_size = 128;
 
 template <typename real_type, class fft_r2c, class fft_c2r,
           class fft_c2c_forward, class fft_c2c_inverse, class fft_single>
@@ -161,7 +161,7 @@ __global__ void conv_kernel(real_type *d_input,
     // if(local_row<valid_tile_size && global_row<output_size) {
     //   auto d_output_asComplex = reinterpret_cast<complex_type *>(
     //       d_output + output_data_bias + local_row * output_size);
-    //   for (int i = 0, idx = local_thread_id; idx < valid_tile_size / 2;
+    //   for (int i = 0, idx = local_thread_id;A idx < valid_tile_size / 2;
     //       i++, idx += fft_c2r::stride) {
     //     d_output_asComplex[idx] = thread_data[i];
     //   }
