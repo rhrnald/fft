@@ -2,8 +2,8 @@
 #include <cuda_runtime.h>
 #include <cuComplex.h>
 #include <math.h>
-#include <cooperative_groups/memcpy_async.h>
-#include <cuda/pipeline>
+// #include <cooperative_groups/memcpy_async.h>
+// #include <cuda/pipeline>
 
 #include <cuda.h>
 #include <mma.h>
@@ -32,12 +32,8 @@
 #define EPT_CONST (RADIX_CONST * BATCH_UNIT_CONST / WARP_SIZE_CONST)
 #define NUM_WARP_CONST 4
 
-
-__device__ __forceinline__ cuFloatComplex W(int index, int N) {
-    return make_cuFloatComplex(cosf(-2*PI*index/N), sinf(-2*PI*index/N));
-}
-
-__device__ __forceinline__ int reverse_2bit_groups(int x, int N) {
+template <int N>
+__device__ __forceinline__ int reverse_2bit_groups(int x) {
     int num_groups = N / 2;
     int result = 0;
     for (int i = 0; i < num_groups; ++i) {
@@ -48,8 +44,8 @@ __device__ __forceinline__ int reverse_2bit_groups(int x, int N) {
 }
 
 __device__ __forceinline__
-void fill_reg_b(float b[], int stride,
-                int i_perm, int j_perm, int k, const cuFloatComplex* W_ptr,
+void fill_reg_b(float b[], int stride_log4,
+                int i_perm, int j_perm, int k, const cuFloatComplex* __restrict__ W_ptr,
                 bool inverse=false)
 {
     // b = [ w^ (i+i_perm) ( k + N(j+j_perm)) ] ^ T
@@ -76,10 +72,9 @@ void fill_reg_b(float b[], int stride,
     // }
     // return;
 
-    // auto w = W(j*(k+stride*i),4*stride);
-    // cuFloatComplex w = make_cuFloatComplex(0.0f, 0.0f);
-    int index = (1024/stride)*((j*(k+stride*i))%(4*stride));
-    const cuFloatComplex w = W_ptr[index];
+    int stride = 1<<(stride_log4<<1);
+    int index = (1<<((5-stride_log4)<<1))*((j*(k+stride*i))&(4*stride-1));
+    cuFloatComplex w = W_ptr[index];
 
     
     if((threadIdx.x/4) & 1) {
@@ -239,7 +234,7 @@ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
 // }
 
 // in-place device kernel
-__device__ __forceinline__ void fft_kernel_r64_b16(cuFloatComplex* reg, const cuFloatComplex* W_4096) {
+__device__ __forceinline__ void fft_kernel_r64_b16(cuFloatComplex* reg, const cuFloatComplex* __restrict__ W_4096) {
     //Tensor core shape
     // constexpr int m=16;
     // constexpr int n=8;
@@ -276,13 +271,15 @@ __device__ __forceinline__ void fft_kernel_r64_b16(cuFloatComplex* reg, const cu
             // w = w_4stride
             // b = [ w^ i ( k + Nj) ] ^ T
             int j_perm;
-            if(stride>=4) j_perm=(j / (stride/4)) % RADIX_DEVICE_CONST;
+            // if(stride>=4) j_perm=(j / (stride/4)) % RADIX_DEVICE_CONST;
+            // else j_perm=0;
+            if(stride>=4) j_perm=(j >> 2*(i-1)) % RADIX_DEVICE_CONST;
             else j_perm=0;
             
-            int i_perm = (j / stride) % RADIX_DEVICE_CONST;
-            int k = j % stride;
+            int i_perm = (j >> (2*i)) % RADIX_DEVICE_CONST;
+            int k = j & (stride-1);
 
-            fill_reg_b(reg_frag_b, stride, i_perm, j_perm, k, W_4096);
+            fill_reg_b(reg_frag_b, i, i_perm, j_perm, k, W_4096);
             // printf("%d %d %d %d %d : %f %f\n", threadIdx.x, stride, i_perm, j_perm, k, reg_frag_b[0], reg_frag_b[1]);
 
             mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b, reg_frag_zero);
@@ -309,7 +306,8 @@ __device__ __forceinline__ void fft_kernel_r64_b16(cuFloatComplex* reg, const cu
     }
 }
 
-__device__ __forceinline__ int reverse_6bit_groups(int x, int N) {
+template <int N>
+__device__ __forceinline__ int reverse_6bit_groups(int x) {
     int num_groups = N / 6;
     int result = 0;
     for (int i = 0; i < num_groups; ++i) {
@@ -322,6 +320,7 @@ __device__ __forceinline__ int reverse_6bit_groups(int x, int N) {
 // blockDim = {32,4}
 // gridDim = batch_size
 __global__ void fft_kernel_radix4096_batch1(cuFloatComplex* d_data, const cuFloatComplex* __restrict__ W_4096) {
+    // auto group = cooperative_groups::this_thread_block();
     cuFloatComplex reg[EPT_CONST];
 
     int warp_id = threadIdx.y;
@@ -329,16 +328,19 @@ __global__ void fft_kernel_radix4096_batch1(cuFloatComplex* d_data, const cuFloa
     int block_id = blockIdx.x;
 
     __shared__ cuFloatComplex s_data[NUM_WARP_CONST*EPT_CONST*(WARP_SIZE_CONST+1)];
-    
+
+    // cuda::barrier<cuda::thread_scope_block> barrier;
+
     // gmem -> smem -> reg
     // smem shape: [num_warp, ept, warp_size+1]
     for(int i=0; i<EPT_CONST; i++) {
         s_data[warp_id*EPT_CONST*(WARP_SIZE_CONST+1) + i*(WARP_SIZE_CONST+1) + lane_id] = d_data[block_id * N_CONST + 128*i+64*(lane_id/16)+16*warp_id+(lane_id%16)];
     }
+    // barrier.arrive_and_wait();
     __syncwarp();
 
     for(int i=0; i<EPT_CONST/2; i++) {
-        int index = reverse_2bit_groups(lane_id%4 + 4*i, 6)*64 + warp_id*16 + lane_id/4;
+        int index = reverse_2bit_groups<6>(lane_id%4 + 4*i)*64 + warp_id*16 + lane_id/4;
         reg[i] = s_data[warp_id*EPT_CONST*(WARP_SIZE_CONST+1) + (index/128)*(WARP_SIZE_CONST+1) + 16*((index/64)%2) + (index%16)];
         reg[i+EPT_CONST/2] = s_data[warp_id*EPT_CONST*(WARP_SIZE_CONST+1) + (index/128)*(WARP_SIZE_CONST+1) + 16*((index/64)%2) + (index%16) + 8];
     }
@@ -353,9 +355,9 @@ __global__ void fft_kernel_radix4096_batch1(cuFloatComplex* d_data, const cuFloa
         s_data[i*NUM_WARP_CONST*(WARP_SIZE_CONST+1) + warp_id*(WARP_SIZE_CONST+1) + lane_id] = reg[i];
     }
     __syncthreads();
-    
+
     for(int i=0; i<EPT_CONST/2; i++) {
-        int index = warp_id + (lane_id%4)*(WARP_SIZE_CONST+1) + (reverse_2bit_groups(i, 4)%8)*4 + (lane_id/4 + (reverse_2bit_groups(i, 4)/8)*16)*NUM_WARP_CONST*(WARP_SIZE_CONST+1);
+        int index = warp_id + (lane_id%4)*(WARP_SIZE_CONST+1) + (reverse_2bit_groups<4>(i)%8)*4 + (lane_id/4 + (reverse_2bit_groups<4>(i)/8)*16)*NUM_WARP_CONST*(WARP_SIZE_CONST+1);
         reg[i] = s_data[index];
         reg[i + EPT_CONST/2] = s_data[index + 8*NUM_WARP_CONST*(WARP_SIZE_CONST+1)];
     }
@@ -363,10 +365,10 @@ __global__ void fft_kernel_radix4096_batch1(cuFloatComplex* d_data, const cuFloa
     // element-wise multiplication
     // TODO: W_1024 rather than W_4096
     for(int i=0; i<EPT_CONST/2; i++) {
-        int index1 = reverse_2bit_groups(i, 4) + lane_id*16 + 1024*warp_id;
-        const cuFloatComplex w1 = W_4096[((index1/64)*(index1%64))%4096];
-        int index2 = index1 + 8;
-        const cuFloatComplex w2 = W_4096[((index2/64)*(index2%64))%4096];
+        int index = reverse_2bit_groups<4>(i) + lane_id*16 + 1024*warp_id;
+        cuFloatComplex w1 = W_4096[((index/64)*(index%64))%4096];
+        index += 8;
+        cuFloatComplex w2 = W_4096[((index/64)*(index%64))%4096];
         reg[i] = make_cuFloatComplex(reg[i].x * w1.x - reg[i].y * w1.y, reg[i].x * w1.y + reg[i].y * w1.x);
         reg[i + EPT_CONST/2] = make_cuFloatComplex(reg[i + EPT_CONST/2].x * w2.x - reg[i + EPT_CONST/2].y * w2.y, reg[i + EPT_CONST/2].x * w2.y + reg[i + EPT_CONST/2].y * w2.x);
     }

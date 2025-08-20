@@ -14,7 +14,7 @@ do {                                                                           \
 } while (0)
 
 __global__ void fft_kernel_radix64_batch16(cuFloatComplex* d_data, const cuFloatComplex* __restrict__ W_64);
-__global__ void fft_kernel_radix4096_batch1(cuFloatComplex* d_data, const cuFloatComplex* W_4096);
+__global__ void fft_kernel_radix4096_batch1(cuFloatComplex* d_data, const cuFloatComplex* __restrict__ W_4096);
 
 template<long long N>
 void my_fft(cuFloatComplex* d_data) {
