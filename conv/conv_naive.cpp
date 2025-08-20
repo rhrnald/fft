@@ -31,22 +31,3 @@ void convolution_naive(float *input, float *filter, float *output, int N,
   float gflops = ops / (time_ms * 1e6f);
   printf("[Naive ] Time: %.3f ms, GFLOPS: %.2f\n", time_ms, gflops);
 }
-
-bool validate(float *ref, float *target, int size, const char *tag) {
-  int errors = 0;
-  for (int i = 0; i < size; ++i) {
-    float diff = fabs(ref[i] - target[i]);
-    if (diff > 1e-3f) {
-      if (++errors <= 5)
-        printf("[Mismatch:%s] idx=%d ref=%.3f target=%.3f\n", tag, i, ref[i],
-               target[i]);
-    }
-  }
-  if (errors == 0) {
-    printf("[%s] Validation PASSED\n", tag);
-    return true;
-  } else {
-    printf("[%s] Validation FAILED with %d mismatches\n", tag, errors);
-    return false;
-  }
-}

@@ -10,7 +10,7 @@
 #   ./conv_compare --N 8192 --f 31 --T 64
 
 # srun -p thunder4 --exclusive --gres=gpu:1 --nodelist=v07 \
-  ./conv_compare --N 64 --f 33 --T 64
+  ./conv_compare --N 1024 --f 33 --T 64
 
 # srun -p thunder4 --exclusive --gres=gpu:1 --nodelist=v07 \
 #   ./conv_compare --N 8192 --f 35 --T 64

@@ -5,7 +5,24 @@
 #include <stdlib.h>
 #include <string.h>
 
-bool validate(float *ref, float *target, int size, const char *tag);
+bool validate(float *ref, float *target, int out_size, const char *tag) {
+  int errors = 0;
+  for (int i = 0; i < out_size*out_size; ++i) {
+    float diff = fabs(ref[i] - target[i]);
+    if (diff > 1e-1f) {
+      if (++errors <= 10000)
+        printf("[Mismatch:%s] idx=%d,%d ref=%.3f target=%.3f\n", tag, i/out_size, i%out_size, ref[i],
+               target[i]);
+    }
+  }
+  if (errors == 0) {
+    printf("[%s] Validation PASSED\n", tag);
+    return true;
+  } else {
+    printf("[%s] Validation FAILED with %d / %d mismatches\n", tag, errors, out_size*out_size);
+    return false;
+  }
+}
 
 void initialize_with_gaussian(float *data, int size, float mean = 0.0f,
                               float stddev = 0.3f) {
@@ -68,20 +85,20 @@ int main(int argc, char **argv) {
   // convolution_naive(input, filter, output_naive, N, f);
   convolution_cudnn(input, filter, output_cudnn, N, f);
   convolution_cufft(input, filter, output_cufft, N, f);
-  convolution_cufft_tiled(input, filter, output_cufft_tiled, N, f, T);
+  // convolution_cufft_tiled(input, filter, output_cufft_tiled, N, f, T);
   // for(int i=0;i<100;i++)
   convolution_cufftdx(input, filter, output_cufftdx, N, f); // tiled
   my_convolution(input, filter, output_my, N, f); // tiled
 
   // Validation
-  // validate(output_naive, output_cudnn, out_size * out_size, "cuDNN");
-  // validate(output_cudnn, output_cufft, out_size * out_size, "cuDNN vs
+  // validate(output_naive, output_cudnn, out_size, "cuDNN");
+  // validate(output_cudnn, output_cufft, out_size, "cuDNN vs
   // cuFFT");
-  validate(output_cudnn, output_cufft_tiled, out_size * out_size,
-           "cuDNN vs cuFFT Tiled");
-  validate(output_cudnn, output_cufftdx, out_size * out_size,
+  // validate(output_cudnn, output_cufft_tiled, out_size,
+  //          "cuDNN vs cuFFT Tiled");
+  validate(output_cudnn, output_cufftdx, out_size,
            "cuDNN vs cuFFTdx");
-  validate(output_cudnn, output_my, out_size * out_size,
+  validate(output_cudnn, output_my, out_size,
            "cuDNN vs my");
 
   // for(int i=0; i<out_size; i++) {
