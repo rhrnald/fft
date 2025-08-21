@@ -17,7 +17,7 @@
 // fft_kernel_radix64_batch16(cuFloatComplex *d_data,
 //                            const cuFloatComplex *__restrict__ W_64);
 __device__  void
-fft_kernel_r64_b16(cuFloatComplex *reg, const cuFloatComplex *W_4096);
+fft_kernel_r64_b16(cuFloatComplex *reg, const cuFloatComplex* __restrict__ W_64);
 
 __global__ void fft_kernel_radix4096_batch1(cuFloatComplex *d_data,
                                             const cuFloatComplex *W_4096);
@@ -104,8 +104,6 @@ template <long long N> void my_fft(cuFloatComplex *d_data) {
 #include <cuda_fp16.h>
 #include <mma.h>
 
-#include "my_fft.h"
-
 #define PI 3.14159265358979323846f
 
 #define TC_M_DEVICE_CONST 16
@@ -129,12 +127,13 @@ template <long long N> void my_fft(cuFloatComplex *d_data) {
 #define EPT_CONST (RADIX_CONST * BATCH_UNIT_CONST / WARP_SIZE_CONST)
 #define NUM_WARP_CONST 4
 
-__device__ __forceinline__ cuFloatComplex W(int index, int N) {
+__device__ cuFloatComplex W(int index, int N) {
   return make_cuFloatComplex(cosf(-2 * PI * index / N),
                              sinf(-2 * PI * index / N));
 }
 
-__device__ __forceinline__ int reverse_2bit_groups(int x, int N) {
+template<int N>
+__device__ int reverse_2bit_groups(int x) {
   int num_groups = N / 2;
   int result = 0;
   for (int i = 0; i < num_groups; ++i) {
@@ -144,10 +143,10 @@ __device__ __forceinline__ int reverse_2bit_groups(int x, int N) {
   return result;
 }
 
-__device__ __forceinline__ void fill_reg_b(float b[], int stride, int i_perm,
+template<bool inverse>
+__device__ void fill_reg_b(float b[], int stride_log4, int i_perm,
                                            int j_perm, int k,
-                                           const cuFloatComplex *W_ptr,
-                                           bool inverse = false) {
+                                           const cuFloatComplex * __restrict__ W_64) {
   // b = [ w^ (i+i_perm) ( k + N(j+j_perm)) ] ^ T
 
   // register mapping
@@ -173,9 +172,11 @@ __device__ __forceinline__ void fill_reg_b(float b[], int stride, int i_perm,
   // return;
 
   // auto w = W(j*(k+stride*i),4*stride);
-  // cuFloatComplex w = make_cuFloatComplex(0.0f, 0.0f);
-  int index = (1024 / stride) * ((j * (k + stride * i)) % (4 * stride));
-  const cuFloatComplex w = W_ptr[index];
+  int stride = 1 << stride_log4;
+  int index = (1<<((2-stride_log4)<<1))*((j*(k+stride*i))&(4*stride-1));
+  index = inverse ? 64 - index : index;
+
+  cuFloatComplex w = W_64[index];
 
   if ((threadIdx.x / 4) & 1) {
     b[0] = w.y;
@@ -186,9 +187,10 @@ __device__ __forceinline__ void fill_reg_b(float b[], int stride, int i_perm,
   }
 }
 
-static __device__ __forceinline__ void
+static __device__ void
 mma_m16n8k8_tf32_f32_rowcol(float d[4], const float a[4], const float b[2],
                             const float c[4]) {
+  // __syncwarp();
   auto a0 = __float_as_uint(a[0]);
   auto a1 = __float_as_uint(a[1]);
   auto a2 = __float_as_uint(a[2]);
@@ -206,7 +208,7 @@ mma_m16n8k8_tf32_f32_rowcol(float d[4], const float a[4], const float b[2],
 }
 
 template <typename T>
-__device__ __forceinline__ void permute_radix4(T &a, T &b, T &c, T &d,
+__device__ void permute_radix4(T &a, T &b, T &c, T &d,
                                                int pattern) {
   T t0 = a, t1 = b, t2 = c, t3 = d;
 
@@ -357,8 +359,9 @@ __device__ __forceinline__ void permute_radix4(T &a, T &b, T &c, T &d,
 // }
 
 // in-place device kernel
-__device__ __forceinline__ void
-fft_kernel_r64_b16(cuFloatComplex *reg, const cuFloatComplex *W_4096) {
+template<bool inverse>
+__device__ void
+fft_kernel_r64_b16(cuFloatComplex *reg, const cuFloatComplex* __restrict__ W_64) {
   // Tensor core shape
   // constexpr int m=16;
   // constexpr int n=8;
@@ -408,7 +411,7 @@ fft_kernel_r64_b16(cuFloatComplex *reg, const cuFloatComplex *W_4096) {
       int i_perm = (j / stride) % RADIX_DEVICE_CONST;
       int k = j % stride;
 
-      fill_reg_b(reg_frag_b, stride, i_perm, j_perm, k, W_4096);
+      fill_reg_b<inverse>(reg_frag_b, i, i_perm, j_perm, k, W_64);
       // printf("%d %d %d %d %d : %f %f\n", threadIdx.x, stride, i_perm, j_perm,
       // k, reg_frag_b[0], reg_frag_b[1]);
 
@@ -439,97 +442,87 @@ fft_kernel_r64_b16(cuFloatComplex *reg, const cuFloatComplex *W_4096) {
   }
 }
 
-__device__ __forceinline__ int reverse_6bit_groups(int x, int N) {
-  int num_groups = N / 6;
-  int result = 0;
-  for (int i = 0; i < num_groups; ++i) {
-    int group = (x >> (6 * i)) & 0b111111;
-    result |= group << (6 * (num_groups - 1 - i));
-  }
-  return result;
-}
-
 // blockDim = {32,4}
 // gridDim = batch_size
-__global__ void
-fft_kernel_radix4096_batch1(cuFloatComplex *d_data,
-                            const cuFloatComplex *__restrict__ W_4096) {
-  cuFloatComplex reg[EPT_CONST];
+// __global__ void
+// fft_kernel_radix4096_batch1(cuFloatComplex *d_data,
+//                             const cuFloatComplex *__restrict__ W_4096) {
+//   cuFloatComplex reg[EPT_CONST];
 
-  int warp_id = threadIdx.y;
-  int lane_id = threadIdx.x;
-  int block_id = blockIdx.x;
+//   int warp_id = threadIdx.y;
+//   int lane_id = threadIdx.x;
+//   int block_id = blockIdx.x;
 
-  __shared__ cuFloatComplex
-      s_data[NUM_WARP_CONST * EPT_CONST * (WARP_SIZE_CONST + 1)];
+//   __shared__ cuFloatComplex
+//       s_data[NUM_WARP_CONST * EPT_CONST * (WARP_SIZE_CONST + 1)];
 
-  // gmem -> smem -> reg
-  // smem shape: [num_warp, ept, warp_size+1]
-  for (int i = 0; i < EPT_CONST; i++) {
-    s_data[warp_id * EPT_CONST * (WARP_SIZE_CONST + 1) +
-           i * (WARP_SIZE_CONST + 1) + lane_id] =
-        d_data[block_id * N_CONST + 128 * i + 64 * (lane_id / 16) +
-               16 * warp_id + (lane_id % 16)];
-  }
-  __syncwarp();
+//   // gmem -> smem -> reg
+//   // smem shape: [num_warp, ept, warp_size+1]
+//   for (int i = 0; i < EPT_CONST; i++) {
+//     s_data[warp_id * EPT_CONST * (WARP_SIZE_CONST + 1) +
+//            i * (WARP_SIZE_CONST + 1) + lane_id] =
+//         d_data[block_id * N_CONST + 128 * i + 64 * (lane_id / 16) +
+//                16 * warp_id + (lane_id % 16)];
+//   }
+//   __syncwarp();
 
-  for (int i = 0; i < EPT_CONST / 2; i++) {
-    int index = reverse_2bit_groups(lane_id % 4 + 4 * i, 6) * 64 +
-                warp_id * 16 + lane_id / 4;
-    reg[i] = s_data[warp_id * EPT_CONST * (WARP_SIZE_CONST + 1) +
-                    (index / 128) * (WARP_SIZE_CONST + 1) +
-                    16 * ((index / 64) % 2) + (index % 16)];
-    reg[i + EPT_CONST / 2] =
-        s_data[warp_id * EPT_CONST * (WARP_SIZE_CONST + 1) +
-               (index / 128) * (WARP_SIZE_CONST + 1) + 16 * ((index / 64) % 2) +
-               (index % 16) + 8];
-  }
-  __syncthreads();
+//   for (int i = 0; i < EPT_CONST / 2; i++) {
+//     int index = reverse_2bit_groups(lane_id % 4 + 4 * i, 6) * 64 +
+//                 warp_id * 16 + lane_id / 4;
+//     reg[i] = s_data[warp_id * EPT_CONST * (WARP_SIZE_CONST + 1) +
+//                     (index / 128) * (WARP_SIZE_CONST + 1) +
+//                     16 * ((index / 64) % 2) + (index % 16)];
+//     reg[i + EPT_CONST / 2] =
+//         s_data[warp_id * EPT_CONST * (WARP_SIZE_CONST + 1) +
+//                (index / 128) * (WARP_SIZE_CONST + 1) + 16 * ((index / 64) % 2) +
+//                (index % 16) + 8];
+//   }
+//   __syncthreads();
 
-  // fft64_b16 iter 0 execute (4 warp executes each fft parallel)
-  fft_kernel_r64_b16(reg, W_4096);
+//   // fft64_b16 iter 0 execute (4 warp executes each fft parallel)
+//   fft_kernel_r64_b16(reg, W_4096);
 
-  // reg -> smem -> reg
-  // smem shape: [ept, num_warp, warp_size+1]
-  for (int i = 0; i < EPT_CONST; i++) {
-    s_data[i * NUM_WARP_CONST * (WARP_SIZE_CONST + 1) +
-           warp_id * (WARP_SIZE_CONST + 1) + lane_id] = reg[i];
-  }
-  __syncthreads();
+//   // reg -> smem -> reg
+//   // smem shape: [ept, num_warp, warp_size+1]
+//   for (int i = 0; i < EPT_CONST; i++) {
+//     s_data[i * NUM_WARP_CONST * (WARP_SIZE_CONST + 1) +
+//            warp_id * (WARP_SIZE_CONST + 1) + lane_id] = reg[i];
+//   }
+//   __syncthreads();
 
-  for (int i = 0; i < EPT_CONST / 2; i++) {
-    int index = warp_id + (lane_id % 4) * (WARP_SIZE_CONST + 1) +
-                (reverse_2bit_groups(i, 4) % 8) * 4 +
-                (lane_id / 4 + (reverse_2bit_groups(i, 4) / 8) * 16) *
-                    NUM_WARP_CONST * (WARP_SIZE_CONST + 1);
-    reg[i] = s_data[index];
-    reg[i + EPT_CONST / 2] =
-        s_data[index + 8 * NUM_WARP_CONST * (WARP_SIZE_CONST + 1)];
-  }
+//   for (int i = 0; i < EPT_CONST / 2; i++) {
+//     int index = warp_id + (lane_id % 4) * (WARP_SIZE_CONST + 1) +
+//                 (reverse_2bit_groups(i, 4) % 8) * 4 +
+//                 (lane_id / 4 + (reverse_2bit_groups(i, 4) / 8) * 16) *
+//                     NUM_WARP_CONST * (WARP_SIZE_CONST + 1);
+//     reg[i] = s_data[index];
+//     reg[i + EPT_CONST / 2] =
+//         s_data[index + 8 * NUM_WARP_CONST * (WARP_SIZE_CONST + 1)];
+//   }
 
-  // element-wise multiplication
-  // TODO: W_1024 rather than W_4096
-  for (int i = 0; i < EPT_CONST / 2; i++) {
-    int index1 = reverse_2bit_groups(i, 4) + lane_id * 16 + 1024 * warp_id;
-    const cuFloatComplex w1 = W_4096[((index1 / 64) * (index1 % 64)) % 4096];
-    int index2 = index1 + 8;
-    const cuFloatComplex w2 = W_4096[((index2 / 64) * (index2 % 64)) % 4096];
-    reg[i] = make_cuFloatComplex(reg[i].x * w1.x - reg[i].y * w1.y,
-                                 reg[i].x * w1.y + reg[i].y * w1.x);
-    reg[i + EPT_CONST / 2] = make_cuFloatComplex(
-        reg[i + EPT_CONST / 2].x * w2.x - reg[i + EPT_CONST / 2].y * w2.y,
-        reg[i + EPT_CONST / 2].x * w2.y + reg[i + EPT_CONST / 2].y * w2.x);
-  }
+//   // element-wise multiplication
+//   // TODO: W_1024 rather than W_4096
+//   for (int i = 0; i < EPT_CONST / 2; i++) {
+//     int index1 = reverse_2bit_groups(i, 4) + lane_id * 16 + 1024 * warp_id;
+//     const cuFloatComplex w1 = W_4096[((index1 / 64) * (index1 % 64)) % 4096];
+//     int index2 = index1 + 8;
+//     const cuFloatComplex w2 = W_4096[((index2 / 64) * (index2 % 64)) % 4096];
+//     reg[i] = make_cuFloatComplex(reg[i].x * w1.x - reg[i].y * w1.y,
+//                                  reg[i].x * w1.y + reg[i].y * w1.x);
+//     reg[i + EPT_CONST / 2] = make_cuFloatComplex(
+//         reg[i + EPT_CONST / 2].x * w2.x - reg[i + EPT_CONST / 2].y * w2.y,
+//         reg[i + EPT_CONST / 2].x * w2.y + reg[i + EPT_CONST / 2].y * w2.x);
+//   }
 
-  // fft64_b16 iter 1 execute (4 warp executes each fft parallel)
-  fft_kernel_r64_b16(reg, W_4096);
+//   // fft64_b16 iter 1 execute (4 warp executes each fft parallel)
+//   fft_kernel_r64_b16(reg, W_4096);
 
-  // reg -> gmem
-  // TODO: reg -> smem -> gmem optimization
-  for (int i = 0; i < EPT_CONST / 2; i++) {
-    d_data[block_id * N_CONST + lane_id / 4 + 1024 * (lane_id % 4) +
-           64 * (i % 16) + warp_id * 16] = reg[i];
-    d_data[block_id * N_CONST + lane_id / 4 + 1024 * (lane_id % 4) +
-           64 * (i % 16) + 8 + warp_id * 16] = reg[i + EPT_CONST / 2];
-  }
-}
+//   // reg -> gmem
+//   // TODO: reg -> smem -> gmem optimization
+//   for (int i = 0; i < EPT_CONST / 2; i++) {
+//     d_data[block_id * N_CONST + lane_id / 4 + 1024 * (lane_id % 4) +
+//            64 * (i % 16) + warp_id * 16] = reg[i];
+//     d_data[block_id * N_CONST + lane_id / 4 + 1024 * (lane_id % 4) +
+//            64 * (i % 16) + 8 + warp_id * 16] = reg[i + EPT_CONST / 2];
+//   }
+// }

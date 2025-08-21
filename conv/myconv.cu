@@ -21,9 +21,10 @@ using namespace cufftdx;
 
 static constexpr unsigned int tile_size = 64;
 
+__launch_bounds__(128)
 __global__ void my_conv_kernel(float *d_input,
                             cufftdx::complex<float> *d_filter,
-                            float *d_output, int input_size, int f, const cuFloatComplex *W_4096, const cuFloatComplex *IW_4096) {
+                            float *d_output, int input_size, int f, const cuFloatComplex* __restrict__ W_64) {
   using complex_type = typename cufftdx::complex<float>;
 
   // Allocate register
@@ -36,10 +37,6 @@ __global__ void my_conv_kernel(float *d_input,
 
   const int output_size = input_size - f + 1;
   const int valid_tile_size = tile_size - f + 1;
-
-  const int input_data_bias = (blockIdx.x + blockIdx.y * input_size) * valid_tile_size;
-  const int output_data_bias =
-      (blockIdx.x + blockIdx.y * output_size) * valid_tile_size;
 
   // gmem -> smem
   for (int local_row = warp_id; local_row < tile_size; local_row+=blockDim.y) {
@@ -62,11 +59,11 @@ __global__ void my_conv_kernel(float *d_input,
   for(int i=0; i<32; i++) {
     int row = lane_id/4 + (i/16)*8 + warp_id*16;
     int col = lane_id%4 + (i%16)*4;
-    thread_data[i].x = *(((float*)tile) +row*(tile_size + 2)+reverse_2bit_groups(col,6));
+    thread_data[i].x = *(((float*)tile) +row*(tile_size + 2)+reverse_2bit_groups<6>(col));
     thread_data[i].y = 0.0f;
   }
 
-  fft_kernel_r64_b16((cuFloatComplex *)thread_data, W_4096);
+  fft_kernel_r64_b16<false>((cuFloatComplex *)thread_data, W_64);
 
   for(int i=0; i<32; i++) {
     int row = (lane_id/4) + (i/16)*8 + warp_id*16;
@@ -82,11 +79,11 @@ __global__ void my_conv_kernel(float *d_input,
     int col = lane_id/4 + (i/16)*8 + warp_id*16;
     int row = lane_id%4 + (i%16)*4;
     if(col<tile_size/2+1) {
-      thread_data[i] = tile[reverse_2bit_groups(row,6) * (tile_size/2+1) + col];
+      thread_data[i] = tile[reverse_2bit_groups<6>(row) * (tile_size/2+1) + col];
     }
   }
 
-  if(warp_id<3) fft_kernel_r64_b16((cuFloatComplex *)thread_data, W_4096);
+  if(warp_id<3) fft_kernel_r64_b16<false>((cuFloatComplex *)thread_data, W_64);
 
   for(int i=0; i<32; i++) {
     int col = (lane_id/4) + (i/16)*8 + warp_id*16;
@@ -110,11 +107,11 @@ __global__ void my_conv_kernel(float *d_input,
     int col = lane_id/4 + (i/16)*8 + warp_id*16;
     int row = lane_id%4 + (i%16)*4;
     if(col<tile_size/2+1) {
-      thread_data[i] = tile[reverse_2bit_groups(row,6) * (tile_size/2+1) + col];
+      thread_data[i] = tile[reverse_2bit_groups<6>(row) * (tile_size/2+1) + col];
     }
   }
 
-  if(warp_id<3) fft_kernel_r64_b16((cuFloatComplex *)thread_data, IW_4096);
+  if(warp_id<3) fft_kernel_r64_b16<true>((cuFloatComplex *)thread_data, W_64);
 
   for(int i=0; i<32; i++) {
     int col = (lane_id/4) + (i/16)*8 + warp_id*16;
@@ -139,15 +136,15 @@ __global__ void my_conv_kernel(float *d_input,
   for(int i=0; i<32; i++) {
     int row = lane_id/4 + (i/16)*8 + warp_id*16;
     int col = lane_id%4 + (i%16)*4;
-    if(reverse_2bit_groups(col,6)<tile_size/2+1) {
-      thread_data[i] = tile[row * (tile_size/2+1) + reverse_2bit_groups(col,6)];
+    if(reverse_2bit_groups<6>(col)<tile_size/2+1) {
+      thread_data[i] = tile[row * (tile_size/2+1) + reverse_2bit_groups<6>(col)];
     } else {
-      thread_data[i] = tile[row * (tile_size/2+1) + tile_size-reverse_2bit_groups(col,6)];
+      thread_data[i] = tile[row * (tile_size/2+1) + tile_size-reverse_2bit_groups<6>(col)];
       thread_data[i].y = -thread_data[i].y;
     }
   }
 
-  fft_kernel_r64_b16((cuFloatComplex *)thread_data, IW_4096);
+  fft_kernel_r64_b16<true>((cuFloatComplex *)thread_data, W_64);
 
   for(int i=0; i<32; i++) {
     int row = (lane_id/4) + (i/16)*8 + warp_id*16;
@@ -200,31 +197,44 @@ void my_FFTconv(real_type *d_input, cufftdx::complex<real_type> *d_filter,
   // cudaFuncSetAttribute(my_conv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
   //                      total_shared_mem);
 
-  cuFloatComplex h_W_4096[4096], h_IW_4096[4096];
-  for (int i = 0; i < 4096; i++) {
-    h_W_4096[i] = make_cuFloatComplex(cos((-2 * M_PI * i) / 4096.0),
-                                      sin((-2 * M_PI * i) / 4096.0));
-    
-    h_IW_4096[i] = make_cuFloatComplex(cos((-2 * M_PI * i) / 4096.0),
-                                      -sin((-2 * M_PI * i) / 4096.0));
+  cuFloatComplex h_W_64[64];
+  for (int i = 0; i < 64; i++) {
+    h_W_64[i] = make_cuFloatComplex(cos((-2 * M_PI * i) / 64.0),
+                                    sin((-2 * M_PI * i) / 64.0));
   }
 
-  cuFloatComplex *W_4096, *IW_4096;
-  CHECK_CUDA(cudaMalloc(&W_4096, 4096 * sizeof(cuFloatComplex)));
-  CHECK_CUDA(cudaMemcpy(W_4096, h_W_4096, 4096 * sizeof(cuFloatComplex),
+  cuFloatComplex *W_64;
+  CHECK_CUDA(cudaMalloc(&W_64, 64 * sizeof(cuFloatComplex)));
+  CHECK_CUDA(cudaMemcpy(W_64, h_W_64, 64 * sizeof(cuFloatComplex),
                         cudaMemcpyHostToDevice));
 
-  CHECK_CUDA(cudaMalloc(&IW_4096, 4096 * sizeof(cuFloatComplex)));
-  CHECK_CUDA(cudaMemcpy(IW_4096, h_IW_4096, 4096 * sizeof(cuFloatComplex),
-                        cudaMemcpyHostToDevice));
+  // Persisting L2 Cache
+  cudaDeviceProp prop;
+  cudaGetDeviceProperties(&prop, 0);
+  size_t size = std::min(int(sizeof(cuFloatComplex) * 64), prop.persistingL2CacheMaxSize);
+  checkCuda(cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, size));
+
+  cudaStreamAttrValue stream_attribute;                                         // Stream level attributes data structure
+  stream_attribute.accessPolicyWindow.base_ptr  = reinterpret_cast<void*>(W_64); // Global Memory data pointer
+  stream_attribute.accessPolicyWindow.num_bytes = 64 * sizeof(cuFloatComplex);                    // Number of bytes for persistence access.
+                                                                                // (Must be less than cudaDeviceProp::accessPolicyMaxWindowSize)
+  stream_attribute.accessPolicyWindow.hitRatio  = 1;                          // Hint for cache hit ratio
+  stream_attribute.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting; // Type of access property on cache hit
+  stream_attribute.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;  // Type of access property on cache miss.
+
+  cudaStream_t stream;
+  checkCuda(cudaStreamCreate(&stream));
+
+  checkCuda(cudaStreamSetAttribute(stream, cudaStreamAttributeAccessPolicyWindow, &stream_attribute));
   
   int tile_num = (N + tile_size - f - f + 1) / (tile_size - f + 1);
   dim3 tile_grid(tile_num, tile_num);
   GpuTimer timer;
   timer.Start();
   dim3 block_dim(32,4);
-  my_conv_kernel<<<tile_grid, block_dim>>>(d_input, d_filter, d_output,
-                                                    N, f, W_4096, IW_4096);
+  my_conv_kernel<<<tile_grid, block_dim, 0, stream>>>(d_input, d_filter, d_output,
+                                                  N, f, W_64);
+  cudaDeviceSynchronize();
   timer.Stop();
 
   // dim3 tmp={8,1};
