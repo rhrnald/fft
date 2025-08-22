@@ -144,7 +144,7 @@ __device__ int reverse_2bit_groups(int x) {
 }
 
 template<bool inverse>
-__device__ void fill_reg_b(float b[], int stride_log4, int i_perm,
+__device__ void fill_reg_b(float b[], int stride_log4, int stride, int i_perm,
                                            int j_perm, int k,
                                            const cuFloatComplex * __restrict__ W_64) {
   // b = [ w^ (i+i_perm) ( k + N(j+j_perm)) ] ^ T
@@ -172,18 +172,26 @@ __device__ void fill_reg_b(float b[], int stride_log4, int i_perm,
   // return;
 
   // auto w = W(j*(k+stride*i),4*stride);
-  int stride = 1 << stride_log4;
   int index = (1<<((2-stride_log4)<<1))*((j*(k+stride*i))&(4*stride-1));
-  index = inverse ? 64 - index : index;
 
   cuFloatComplex w = W_64[index];
 
-  if ((threadIdx.x / 4) & 1) {
-    b[0] = w.y;
-    b[1] = w.x;
+  if (!inverse) {
+    if ((threadIdx.x / 4) & 1) {
+      b[0] = w.y;
+      b[1] = w.x;
+    } else {
+      b[0] = w.x;
+      b[1] = -w.y;
+    }
   } else {
-    b[0] = w.x;
-    b[1] = -w.y;
+    if ((threadIdx.x / 4) & 1) {
+      b[0] = -w.y;
+      b[1] = w.x;
+    } else {
+      b[0] = w.x;
+      b[1] = w.y;
+    }
   }
 }
 
@@ -411,7 +419,7 @@ fft_kernel_r64_b16(cuFloatComplex *reg, const cuFloatComplex* __restrict__ W_64)
       int i_perm = (j / stride) % RADIX_DEVICE_CONST;
       int k = j % stride;
 
-      fill_reg_b<inverse>(reg_frag_b, i, i_perm, j_perm, k, W_64);
+      fill_reg_b<inverse>(reg_frag_b, i, stride, i_perm, j_perm, k, W_64);
       // printf("%d %d %d %d %d : %f %f\n", threadIdx.x, stride, i_perm, j_perm,
       // k, reg_frag_b[0], reg_frag_b[1]);
 

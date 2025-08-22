@@ -151,6 +151,7 @@ __global__ void my_conv_kernel(float *d_input,
     int col = (lane_id%4) * 16 + (i%16);
     *(((float*)tile) +row*(tile_size + 2)+col) = thread_data[i].x;
   }
+  __syncthreads();
 
   for (int local_row = warp_id; local_row < tile_size; local_row+=blockDim.y) {
     int global_row = local_row + blockIdx.y * valid_tile_size;
