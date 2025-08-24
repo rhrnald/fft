@@ -119,7 +119,7 @@ __global__ void my_conv_kernel(float *d_input,
   for(int i=0; i<32; i++) {
     int col = (lane_id/4) + (i/16)*8 + warp_id*16;
     int row = (lane_id%4) * 16 + (i%16);
-    if(col<tile_size/2+1) {
+    if(col<tile_size/2) {
       tile[row * (tile_size/2+1) + col] = thread_data[i];
     }
   }
@@ -177,7 +177,7 @@ __global__ void my_conv_kernel(float *d_input,
   for(int i=0; i<32; i++) {
     int col = (lane_id/4) + (i/16)*8 + warp_id*16;
     int row = (lane_id%4) * 16 + (i%16);
-    if(col<tile_size/2+1) {
+    if(row<valid_tile_size) {
       tile[row * (tile_size/2+1) + col] = thread_data[i];
     }
   }
@@ -185,7 +185,7 @@ __global__ void my_conv_kernel(float *d_input,
   __syncthreads();
 
   fft_c2r_kernel_r64_b16((cuFloatComplex *)thread_data, W_64, tile);
-  fft_c2r_kernel_r64_b16((cuFloatComplex *)(thread_data+16), W_64, tile+(tile_size/2+1)*(tile_size/2));
+  // fft_c2r_kernel_r64_b16((cuFloatComplex *)(thread_data+16), W_64, tile+(tile_size/2+1)*(tile_size/2));
 
   __syncthreads();
   for(int i=0; i<8; i++) {
@@ -194,8 +194,8 @@ __global__ void my_conv_kernel(float *d_input,
 
     tile[row*(tile_size/2 + 1)+col] = thread_data[i];
     tile[(row+8)*(tile_size/2 + 1)+col] = thread_data[i+8];
-    tile[(row+32)*(tile_size/2 + 1)+col] = thread_data[i+16];
-    tile[(row+40)*(tile_size/2 + 1)+col] = thread_data[i+24];
+    // tile[(row+32)*(tile_size/2 + 1)+col] = thread_data[i+16];
+    // tile[(row+40)*(tile_size/2 + 1)+col] = thread_data[i+24];
   }
 
   __syncthreads();
