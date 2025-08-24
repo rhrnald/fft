@@ -129,19 +129,6 @@ __global__ void conv_kernel(real_type *d_input,
   }
   __syncthreads();
 
-  // __syncthreads();
-  // if(local_thread_id==0 && local_fft_id==0) {
-  //   for(int i=0 ; i<tile_size;i++) {
-  //     for (int j = 0; j <=tile_size/2; j++) {
-  //       printf("%f %f ", tile[i*(tile_size/2+1)+j].x,
-  //       tile[i*(tile_size/2+1)+j].y);
-  //     }
-  //     printf("\n");
-  //   }
-  //   printf("\n\n");
-  // }
-  // __syncthreads();
-
 
   for (int j = 0; j < (valid_tile_size - 1) / fpb + 1; j++) {
     int local_row = local_fft_id + fpb * j;
@@ -178,25 +165,11 @@ __global__ void conv_kernel(real_type *d_input,
         int global_col = local_col * 2 + blockIdx.x * valid_tile_size;
         if (local_col < valid_tile_size / 2 && global_col < output_size) {
           d_output_asComplex[local_col] = thread_data[i];
-          tile[local_col+(tile_size/2+1)*local_row] = thread_data[i];
+          // tile[local_col+(tile_size/2+1)*local_row] = thread_data[i];
         }
       }
     }
   }
-
-  //   __syncthreads();
-  // if(local_thread_id==0 && local_fft_id==0) {
-  //   for(int i=0 ; i<tile_size;i++) {
-  //     for (int j = 0; j <=tile_size/2; j++) {
-  //       printf("%f %f ", tile[i*(tile_size/2+1)+j].x,
-  //       tile[i*(tile_size/2+1)+j].y);
-  //     }
-  //     printf("\n");
-  //   }
-  //   printf("\n\n");
-  // }
-  // __syncthreads();
-
 }
 
 template <class FFT> void print_FFT_info() {

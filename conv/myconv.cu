@@ -93,19 +93,6 @@ __global__ void my_conv_kernel(float *d_input,
 
   __syncthreads();
 
-  // __syncthreads();
-  // if(local_thread_id==0 && local_fft_id==0) {
-  //   for(int i=0 ; i<tile_size;i++) {
-  //     for (int j = 0; j <=tile_size/2; j++) {
-  //       printf("%f %f ", tile[i*(tile_size/2+1)+j].x,
-  //       tile[i*(tile_size/2+1)+j].y);
-  //     }
-  //     printf("\n");
-  //   }
-  //   printf("\n\n");
-  // }
-  // __syncthreads();
-  
   // col-wise fft
   for(int i=0; i<32; i++) {
     int col = lane_id/4 + (i/16)*8 + warp_id*16;
@@ -116,23 +103,9 @@ __global__ void my_conv_kernel(float *d_input,
 
   fft_kernel_r64_b16<false>((cuFloatComplex *)thread_data, W_64);
 
-  for(int i=0; i<32; i++) {
-    int col = (lane_id/4) + (i/16)*8 + warp_id*16;
-    int row = (lane_id%4) * 16 + (i%16);
-    if(col<tile_size/2) {
-      tile[row * (tile_size/2+1) + col] = thread_data[i];
-    }
-  }
-
   __syncthreads();
 
   //element-wise mult
-  // for(int row=lane_id; row<tile_size; row+=32) {
-  //   for (int col = warp_id; col <=tile_size/2; col+=blockDim.y) {
-  //     ((complex_type*)tile)[row * (tile_size/2+1)  + col] *= d_filter[row * (tile_size/2+1)  + col];
-  //   }
-  // }
-
   for(int i=0; i<32; i++) {
     int col = (lane_id/4) + (i/16)*8 + warp_id*16;
     int row = (lane_id%4) * 16 + (i%16);
@@ -143,6 +116,7 @@ __global__ void my_conv_kernel(float *d_input,
   }
 
   
+  //0'th column element wise multiplication
   int idx=threadIdx.x+threadIdx.y*32;
   if(idx<4) {
     for(int i=0;i<16;i++)
@@ -170,6 +144,7 @@ __global__ void my_conv_kernel(float *d_input,
   __syncthreads();
 
   swap_thread_data(thread_data);
+
 
   // col-wise ifft
   fft_kernel_r64_b16<true>((cuFloatComplex *)thread_data, W_64);
