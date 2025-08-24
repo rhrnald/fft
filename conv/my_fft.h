@@ -143,8 +143,20 @@ __device__ int reverse_2bit_groups(int x) {
   return result;
 }
 
+__device__ int reverse_2bit_groups_6(int x) {
+  return ((x&3)<<4) | (((x>>2)&3)<<2) | ((x>>4) & 3);
+}
+
+__device__ int reverse_2bit_groups_5(int x) {
+  return ((x&3)<<3) | (((x>>2)&3)<<1) | ((x>>4) & 1);
+}
+__device__ int reverse_2bit_groups_5_221(int x) {
+  return ((x&1)<<4) | (((x>>1)&3)<<2) | ((x>>3) & 3);
+}
+
+
 template<bool inverse>
-__device__ void fill_reg_b(float b[], int stride_log4, int stride, int i_perm,
+__device__ void fill_reg_b(float b[], int stride_log2, int stride, int i_perm,
                                            int j_perm, int k,
                                            const cuFloatComplex * __restrict__ W_64) {
   // b = [ w^ (i+i_perm) ( k + N(j+j_perm)) ] ^ T
@@ -172,7 +184,7 @@ __device__ void fill_reg_b(float b[], int stride_log4, int stride, int i_perm,
   // return;
 
   // auto w = W(j*(k+stride*i),4*stride);
-  int index = (1<<((2-stride_log4)<<1))*((j*(k+stride*i))&(4*stride-1));
+  int index = (1<<(4-stride_log2))*((j*(k+stride*i))&(4*stride-1));
 
   cuFloatComplex w = W_64[index];
 
@@ -366,6 +378,328 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d,
 //     warp_size] = s_data[i*(warp_size+1) + laneid];
 // }
 
+__device__ void swap_r2c(float2 &z1, float2 &z2, float2 w) {
+  float2 tmp1 = make_float2(z1.x+z2.x, z1.y-z2.y);
+  float2 tmp2 = make_float2(z1.x-z2.x, z1.y+z2.y);
+  tmp2 = make_float2(tmp2.x*w.x-tmp2.y*w.y, tmp2.x*w.y+tmp2.y*w.x);
+  z1 = make_float2((tmp1.x+tmp2.y)/2,(tmp1.y-tmp2.x)/2);
+  z2 = make_float2((tmp1.x-tmp2.y)/2 ,(-tmp1.y-tmp2.x)/2);
+}
+
+__device__ void swap_c2r(float2 &z1, float2 &z2, float2 w) {
+  float2 Ek = make_float2(z1.x+z2.x, z1.y-z2.y);
+  float2 Ok = make_float2(z1.x-z2.x, z1.y+z2.y);
+  Ok = make_float2(Ok.x*w.x + Ok.y*w.y, -Ok.x*w.y+Ok.y*w.x);
+  z1 = make_float2((Ek.x-Ok.y)/2,(Ek.y+Ok.x)/2);
+  z2 = make_float2((Ek.x+Ok.y)/2 ,(-Ek.y+Ok.x)/2);
+}
+
+__device__ void pm(float2 &z1, float2 &z2) {
+  z1 = make_float2((z1.x+z2.x)*2, (z1.y+z2.y)*2);
+  z2 = make_float2(z1.x-4*z2.x, z1.y-4*z2.y);
+}
+__device__ void
+fft_r2c_kernel_r64_b16(cuFloatComplex *reg, const cuFloatComplex* __restrict__ W_64, float2* smem) {
+  // Tensor core shape
+  // constexpr int m=16;
+  // constexpr int n=8;
+  // constexpr int k=8;
+
+  // constexpr int radix = k/2; // = 4
+  // constexpr int iter = 3;
+  // constexpr int N = 64; // radix^iter
+  // constexpr int batch=m;
+  // constexpr int warp_size=32;
+  // constexpr int ept=N * batch / warp_size; // element_per_thread
+
+  // Registers for mma : d = a * b + zero;
+
+  float reg_frag_zero[TC_M_DEVICE_CONST * TC_N_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+
+  for (int i = 0;
+       i < TC_M_DEVICE_CONST * TC_N_DEVICE_CONST / WARP_SIZE_DEVICE_CONST; i++)
+    reg_frag_zero[i] = 0.0f;
+
+  int laneid = threadIdx.x;
+  int lane_id = threadIdx.x;
+  int warp_id = threadIdx.y;
+
+  for (int j = 0; j < N_DEVICE_CONST / RADIX_DEVICE_CONST / 2; j++) {
+    float reg_frag_a[TC_M_DEVICE_CONST * TC_K_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+    float reg_frag_b[TC_K_DEVICE_CONST * TC_N_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+    float reg_frag_d[TC_M_DEVICE_CONST * TC_N_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+
+    reg_frag_a[0] = reg[j].x;
+    reg_frag_a[1] = reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST/2].x;
+    reg_frag_a[2] = reg[j].y;
+    reg_frag_a[3] = reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST/2].y;
+
+    // w = w_4stride
+    // b = [ w^ i ( k + Nj) ] ^ T
+    int j_perm = 0;
+    int i_perm = j & (RADIX_DEVICE_CONST-1);
+    int k = 0;
+
+    fill_reg_b<false>(reg_frag_b, 0, 1, i_perm, j_perm, k, W_64);
+    // printf("%d %d %d %d %d : %f %f\n", threadIdx.x, stride, i_perm, j_perm,
+    // k, reg_frag_b[0], reg_frag_b[1]);
+
+    mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b,
+                                reg_frag_zero);
+
+    reg[j].x = reg_frag_d[0];
+    reg[j].y = reg_frag_d[1];
+    reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST/2].x = reg_frag_d[2];
+    reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST/2].y = reg_frag_d[3];
+  }
+
+
+  for (int j = 0; j <16; j += 4) {
+      // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
+      // t0 t1 t2 t3
+      // 0  1  2  3       0  4  8  12
+      // 7  4  5  6       13 1  5  9
+      // 10 11 8  9	->  10 14 2  6
+      // 13 14 15 12		7  11 15 3
+      permute_radix4(reg[j], reg[j + 1], reg[j+2], reg[j+3], laneid&3);
+  }
+
+
+  for (int j = 0; j < N_DEVICE_CONST / RADIX_DEVICE_CONST / 2; j++) {
+    float reg_frag_a[TC_M_DEVICE_CONST * TC_K_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+    float reg_frag_b[TC_K_DEVICE_CONST * TC_N_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+    float reg_frag_d[TC_M_DEVICE_CONST * TC_N_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+
+    reg_frag_a[0] = reg[j].x;
+    reg_frag_a[1] = reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST/2].x;
+    reg_frag_a[2] = reg[j].y;
+    reg_frag_a[3] = reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST/2].y;
+
+    // w = w_4stride
+    // b = [ w^ i ( k + Nj) ] ^ T
+    int j_perm = j & (RADIX_DEVICE_CONST-1);
+    int i_perm = 0;
+    int k = j & 3;
+
+    fill_reg_b<false>(reg_frag_b, 2, 4, i_perm, j_perm, k, W_64);
+    // printf("%d %d %d %d %d : %f %f\n", threadIdx.x, stride, i_perm, j_perm,
+    // k, reg_frag_b[0], reg_frag_b[1]);
+
+    mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b,
+                                reg_frag_zero);
+
+    reg[j].x = reg_frag_d[0];
+    reg[j].y = reg_frag_d[1];
+    reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST/2].x = reg_frag_d[2];
+    reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST/2].y = reg_frag_d[3];
+  }
+
+  for(int i=0; i<4; i++) {
+    float2 w_tmp = W_64[(i+(lane_id%4)*4)*2];
+    reg[i+4] = make_float2(reg[i+4].x*w_tmp.x - reg[i+4].y*w_tmp.y, reg[i+4].x*w_tmp.y + reg[i+4].y*w_tmp.x);
+    reg[i+12] = make_float2(reg[i+12].x*w_tmp.x - reg[i+12].y*w_tmp.y, reg[i+12].x*w_tmp.y + reg[i+12].y*w_tmp.x);
+
+    float2 tmp1 = reg[i], tmp2=reg[i+4], tmp3=reg[i+8], tmp4=reg[i+12];
+
+    reg[i]=make_float2(tmp1.x + tmp2.x, tmp1.y + tmp2.y);
+    reg[i+4]=make_float2(tmp1.x - tmp2.x, tmp1.y - tmp2.y);
+    reg[i+8]=make_float2(tmp3.x + tmp4.x, tmp3.y + tmp4.y);
+    reg[i+12]=make_float2(tmp3.x - tmp4.x, tmp3.y - tmp4.y);
+  }
+
+  for(int i=0; i<8; i++) {
+    int row = lane_id/4 +  warp_id*16;
+    int col = 16 * ((i % 8) / 4) + (i%4) + lane_id%4 * 4;
+    smem[row*(RADIX_UNIT_CONST/2+1) + col] = reg[i];
+    smem[(row+8)*(RADIX_UNIT_CONST/2+1) + col] = reg[i+8];
+  }
+  __syncwarp();
+
+  for(int i=0; i<4; i++) {
+    int row = lane_id/4 + warp_id*16;
+    int col = i + lane_id%4 * 4;
+    reg[i] = smem[row*(RADIX_UNIT_CONST/2+1) + col];
+    reg[i+4] = smem[row*(RADIX_UNIT_CONST/2+1) + (32-col)%16+16];
+
+    row+=8;
+    reg[i+8] = smem[row*(RADIX_UNIT_CONST/2+1) + col];
+    reg[i+12] = smem[row*(RADIX_UNIT_CONST/2+1) + (32-col)%16+16];
+
+    if(col) {
+      swap_r2c(reg[i], reg[i+4], W_64[col]);
+      swap_r2c(reg[i+8], reg[i+12], W_64[col]);
+    } else {
+      reg[0]=make_float2(reg[0].x+reg[0].y, reg[0].x-reg[0].y);
+      reg[4].y=-reg[4].y;
+
+      reg[8]=make_float2(reg[8].x+reg[8].y, reg[8].x-reg[8].y);
+      reg[12].y=-reg[12].y;
+    }
+  }
+  __syncwarp();
+
+  for(int i=0; i<4; i++) {
+    int row = lane_id/4 + warp_id*16;
+    int col = i + lane_id%4 * 4;
+    smem[row*(RADIX_UNIT_CONST/2+1) + col] = reg[i];
+    smem[row*(RADIX_UNIT_CONST/2+1) + (32-col)%16+16] = reg[i+4];
+    row+=8;
+    smem[row*(RADIX_UNIT_CONST/2+1) + col] = reg[i+8];
+    smem[row*(RADIX_UNIT_CONST/2+1) + (32-col)%16+16] = reg[i+12];
+  }
+}
+
+__device__ void
+fft_c2r_kernel_r64_b16(cuFloatComplex *reg, const cuFloatComplex* __restrict__ W_64, float2* smem) {
+  // Tensor core shape
+  // constexpr int m=16;
+  // constexpr int n=8;
+  // constexpr int k=8;
+
+  // constexpr int radix = k/2; // = 4
+  // constexpr int iter = 3;
+  // constexpr int N = 64; // radix^iter
+  // constexpr int batch=m;
+  // constexpr int warp_size=32;
+  // constexpr int ept=N * batch / warp_size; // element_per_thread
+
+  // Registers for mma : d = a * b + zero;
+
+  float reg_frag_zero[TC_M_DEVICE_CONST * TC_N_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+
+  for (int i = 0;
+       i < TC_M_DEVICE_CONST * TC_N_DEVICE_CONST / WARP_SIZE_DEVICE_CONST; i++)
+    reg_frag_zero[i] = 0.0f;
+
+  int laneid = threadIdx.x;
+  int lane_id = threadIdx.x;
+  int warp_id = threadIdx.y;
+
+  for(int i=0; i<4; i++) {
+    int row = lane_id/4 + warp_id*16;
+    int col = i + lane_id%4 * 4;
+    reg[i] = smem[row*(RADIX_UNIT_CONST/2+1) + col];
+    reg[i+4] = smem[row*(RADIX_UNIT_CONST/2+1) + (32-col)%16+16];
+    reg[i+8] = smem[(row+8)*(RADIX_UNIT_CONST/2+1) + col];
+    reg[i+12] = smem[(row+8)*(RADIX_UNIT_CONST/2+1) + (32-col)%16+16];
+  }
+  
+  __syncwarp();
+
+  for(int i=0; i<4; i++) {
+    int row = lane_id/4 + warp_id*16;
+    int col = i + lane_id%4 * 4;
+
+    if(col) {
+      swap_c2r(reg[i], reg[i+4], W_64[col]);
+      swap_c2r(reg[i+8], reg[i+12], W_64[col]);
+    } else {
+      reg[0]=make_float2((reg[0].x+reg[0].y)/2, (reg[0].x-reg[0].y)/2);
+      reg[4].y=-reg[4].y;
+
+      reg[8]=make_float2((reg[8].x+reg[8].y)/2, (reg[8].x-reg[8].y)/2);
+      reg[12].y=-reg[12].y;
+    }
+    
+    smem[row*(RADIX_UNIT_CONST/2+1) + col] = reg[i];
+    smem[row*(RADIX_UNIT_CONST/2+1) + (32-col)%16+16] = reg[i+4];
+    smem[(row+8)*(RADIX_UNIT_CONST/2+1) + col] = reg[i+8];
+    smem[(row+8)*(RADIX_UNIT_CONST/2+1) + (32-col)%16+16] = reg[i+12];
+  }
+  __syncwarp();
+
+  for(int i=0; i<8; i++) {
+    int row = lane_id/4 +  warp_id*16;
+    int col = ((i % 8) / 2) + (i%2)*16 + lane_id%4 * 4;
+    reg[i]= smem[row*(RADIX_UNIT_CONST/2+1) + col];
+    reg[i+8] = smem[(row+8)*(RADIX_UNIT_CONST/2+1) + col];
+    // reg[i]= make_float2(row*(RADIX_UNIT_CONST/2+1) + col,0);
+    // reg[i+8] = make_float2((row+8)*(RADIX_UNIT_CONST/2+1) + col,0);
+  }
+  for(int i=0; i<16; i+=2) {
+    pm(reg[i], reg[i+1]);
+  }
+
+  for (int j = 0; j < N_DEVICE_CONST / RADIX_DEVICE_CONST; j++) {
+    float reg_frag_a[TC_M_DEVICE_CONST * TC_K_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+    float reg_frag_b[TC_K_DEVICE_CONST * TC_N_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+    float reg_frag_d[TC_M_DEVICE_CONST * TC_N_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+
+    reg_frag_a[0] = reg[j].x;
+    reg_frag_a[1] = reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].x;
+    reg_frag_a[2] = reg[j].y;
+    reg_frag_a[3] = reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].y;
+
+    // w = w_4stride
+    // b = [ w^ i ( k + Nj) ] ^ T
+    int j_perm=0;
+    int i_perm = (j / 2) % RADIX_DEVICE_CONST;
+    int k = j % 2;
+
+    fill_reg_b<true>(reg_frag_b, 1, 2, i_perm, j_perm, k, W_64);
+    // printf("%d %d %d %d %d : %f %f\n", threadIdx.x, stride, i_perm, j_perm,
+    // k, reg_frag_b[0], reg_frag_b[1]);
+
+    mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b,
+                                reg_frag_zero);
+
+    reg[j].x = reg_frag_d[0];
+    reg[j].y = reg_frag_d[1];
+    reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].x = reg_frag_d[2];
+    reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].y = reg_frag_d[3];
+  }
+
+  for (int j = 0; j < 16; j += 8) {
+    for (int k = 0; k < 2; k++) {
+      permute_radix4(reg[k + j], reg[k + j +2],
+                      reg[k + j + 4], reg[k + j + 6],
+                      laneid & 3);
+    }
+  }
+  for (int j = 0; j < N_DEVICE_CONST / RADIX_DEVICE_CONST; j++) {
+    float reg_frag_a[TC_M_DEVICE_CONST * TC_K_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+    float reg_frag_b[TC_K_DEVICE_CONST * TC_N_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+    float reg_frag_d[TC_M_DEVICE_CONST * TC_N_DEVICE_CONST /
+                      WARP_SIZE_DEVICE_CONST];
+
+    reg_frag_a[0] = reg[j].x;
+    reg_frag_a[1] = reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].x;
+    reg_frag_a[2] = reg[j].y;
+    reg_frag_a[3] = reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].y;
+
+    // w = w_4stride
+    // b = [ w^ i ( k + Nj) ] ^ T
+    int j_perm = (j / 2) % RADIX_DEVICE_CONST;
+    int i_perm = 0;
+    int k = j % 8;
+
+    fill_reg_b<true>(reg_frag_b, 3, 8, i_perm, j_perm, k, W_64);
+    // printf("%d %d %d %d %d : %f %f\n", threadIdx.x, stride, i_perm, j_perm,
+    // k, reg_frag_b[0], reg_frag_b[1]);
+
+    mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b,
+                                reg_frag_zero);
+
+    reg[j].x = reg_frag_d[0];
+    reg[j].y = reg_frag_d[1];
+    reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].x = reg_frag_d[2];
+    reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].y = reg_frag_d[3];
+  }
+}
+
 // in-place device kernel
 template<bool inverse>
 __device__ void
@@ -419,7 +753,7 @@ fft_kernel_r64_b16(cuFloatComplex *reg, const cuFloatComplex* __restrict__ W_64)
       int i_perm = (j / stride) % RADIX_DEVICE_CONST;
       int k = j % stride;
 
-      fill_reg_b<inverse>(reg_frag_b, i, stride, i_perm, j_perm, k, W_64);
+      fill_reg_b<inverse>(reg_frag_b, i*2, stride, i_perm, j_perm, k, W_64);
       // printf("%d %d %d %d %d : %f %f\n", threadIdx.x, stride, i_perm, j_perm,
       // k, reg_frag_b[0], reg_frag_b[1]);
 
