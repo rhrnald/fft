@@ -22,7 +22,7 @@ void check_result(float2 *ref, float2 *test, int N) {
 }
 
 int main() {
-  const long long N = 4096 * 65536;
+  const long long N = 65536 * 64;
   cudaDeviceProp prop;
   cudaGetDeviceProperties(&prop, 0);
 
@@ -44,7 +44,6 @@ int main() {
   cudaMemcpy(d_custom, h_input, sizeof(float2) * N, cudaMemcpyHostToDevice);
 
   baseline_fft(d_baseline, N);
-  // my_fft_original(d_custom, N);
   my_fft<N>(d_custom);
 
   float2 *h_baseline = (float2 *)malloc(sizeof(float2) * N);

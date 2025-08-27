@@ -13,16 +13,26 @@
     }                                                                          \
   } while (0)
 
-__global__ void
-fft_kernel_radix64_batch16(cuFloatComplex *d_data,
+template <int N>
+__device__ int reverse_2bit_groups(int x) {
+  int num_groups = N / 2;
+  int result = 0;
+  for (int i = 0; i < num_groups; ++i) {
+    int group = (x >> (2 * i)) & 0b11;
+    result |= group << (2 * (num_groups - 1 - i));
+  }
+  return result;
+}
+
+// in-place device kernel
+template<int N>
+__device__ void fft_kernel_r64_b16(cuFloatComplex *reg, const cuFloatComplex *W_4096);
+__global__ void fft_kernel_radix64_batch16(cuFloatComplex *d_data,
                            const cuFloatComplex *__restrict__ W_64);
 __global__ void fft_kernel_radix4096_batch1(cuFloatComplex *d_data,
                                             const cuFloatComplex *W_4096);
 
 template <long long N> void my_fft(cuFloatComplex *d_data) {
-  // fft_kernel<<<1, N/2, N * sizeof(cuFloatComplex)>>>(d_data, N);
-  // fft_kernel_radix4<<<1, N/4, N * sizeof(cuFloatComplex)>>>(d_data, N);
-
   cudaEvent_t start, stop;
   CHECK_CUDA(cudaEventCreate(&start));
   CHECK_CUDA(cudaEventCreate(&stop));
@@ -49,12 +59,11 @@ template <long long N> void my_fft(cuFloatComplex *d_data) {
   // 타이머 시작
   CHECK_CUDA(cudaEventRecord(start));
 
-  // constexpr unsigned int warp_num=1;
-  // dim3 grid(32, warp_num);
-  // fft_kernel_radix4_matmul<N,warp_num><<<1, grid, N *
-  // sizeof(cuFloatComplex)>>>(d_data);
+  // 64-point FFT
+  fft_kernel_radix64_batch16<<<N / 1024, 32>>>(d_data, W_64);
 
-  fft_kernel_radix4096_batch1<<<N / 4096, dim3(32, 4)>>>(d_data, W_4096);
+  // 4096-point FFT
+  // fft_kernel_radix4096_batch1<<<N / 4096, dim3(32, 4)>>>(d_data, W_4096);
 
   CHECK_CUDA(cudaEventRecord(stop));
 
