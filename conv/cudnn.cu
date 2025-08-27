@@ -68,8 +68,7 @@ void convolution_cudnn(float *h_input, float *h_filter, float *h_output, int N,
         handle, in_desc, filter_desc, conv_desc, out_desc, 1,
         &returned_algo_count, perf_results));
 
-    // cudnnConvolutionFwdAlgo_t algo = perf_results[0].algo;
-    cudnnConvolutionFwdAlgo_t algo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
+    cudnnConvolutionFwdAlgo_t algo = perf_results[0].algo;
 
     size_t workspace_bytes = 0;
     checkCudnn(cudnnGetConvolutionForwardWorkspaceSize(
