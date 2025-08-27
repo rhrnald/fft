@@ -15,7 +15,7 @@ OBJS = $(SRCS:.cu=.o)
 
 # Flags
 ARCH = sm_$(ARCH_NO)
-NVCC_FLAGS = -std=c++17 -O3 -arch=$(ARCH) -DCUFFT_TARGET_ARCHS=$(ARCH_NO)0
+NVCC_FLAGS = -std=c++17 -O3 -arch=$(ARCH) -DCUFFT_TARGET_ARCHS=$(ARCH_NO)0 -lineinfo -Xptxas -v
 CXXFLAGS := -O3 -std=c++14 -Wall -march=native -mavx2 -mno-avx512f -mfma \
             -fopenmp -I/usr/local/cuda/include -fopenmp
 
