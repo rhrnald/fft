@@ -3,7 +3,7 @@ NVCC        := nvcc
 TARGET      := fft
 SRC_FILES   := main.cu baseline_fft.cu my_fft.cu
 CUFFT_LIBS  := -lcufft
-ARCH_FLAGS  := -gencode arch=compute_70,code=sm_70
+ARCH_FLAGS  := -gencode arch=compute_80,code=sm_80
 
 # === 기본 빌드 ===
 all: $(TARGET)
