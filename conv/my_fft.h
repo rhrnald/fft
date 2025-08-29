@@ -183,7 +183,7 @@ __device__ void fill_reg_b(float b[], int stride_log2, int stride, int i_perm,
     cuFloatComplex w = W_64[index];
     // cuFloatComplex w = W(index, 64);
 
-    if (!inverse) {
+    if constexpr (!inverse) {
         if ((threadIdx.x / 4) & 1) {
             b[0] = w.y;
             b[1] = w.x;

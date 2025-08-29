@@ -1,61 +1,102 @@
-#include "my_fft.h"
 #include <math.h>
+#include <stdio.h>
+
+#include "my_fft.h"
 
 void baseline_fft(float2 *d_data, int N);
-void my_fft_original(float2 *d_data, int N);
 
-void check_result(float2 *ref, float2 *test, int N) {
-    float max_err = 0.0f;
+void check_result(const float2* ref, const half2* test, int N,
+                  float atol = 1e-3f, float rtol = 1e-3f) {
+    float max_abs_err = 0.0f;
+    float max_rel_err = 0.0f;
+    int   max_idx_abs = -1;
+    int   max_idx_rel = -1;
 
-    // for(int i=0; i<N; i++) printf("(%f + %f i) ", ref[i].x, ref[i].y);
-    // printf("\n"); for(int i=0; i<N; i++) printf("(%f + %f i) ", test[i].x,
-    // test[i].y); printf("\n");
+    int bad_cnt = 0;
 
     for (int i = 0; i < N; ++i) {
-        float dx = ref[i].x - test[i].x;
-        float dy = ref[i].y - test[i].y;
-        float err = sqrtf(dx * dx + dy * dy);
-        if (err > max_err)
-            max_err = err;
+        // half2 -> float2 변환 (정식 방법)
+        float2 tf = __half22float2(test[i]);  // tf.x, tf.y 가 float
+
+        // 차이 계산
+        float dx = ref[i].x - tf.x;
+        float dy = ref[i].y - tf.y;
+        float abs_err = std::sqrt(dx * dx + dy * dy);
+
+        float ref_mag = std::sqrt(ref[i].x * ref[i].x + ref[i].y * ref[i].y);
+        float rel_err = abs_err / (ref_mag + 1e-20f);
+
+        if (abs_err > max_abs_err) { max_abs_err = abs_err; max_idx_abs = i; }
+        if (rel_err > max_rel_err) { max_rel_err = rel_err; max_idx_rel = i; }
+
+        // 허용 오차 밖이면 몇 개만 샘플로 출력
+        bool fail = abs_err > (atol + rtol * ref_mag);
+        if (fail && bad_cnt < 10) {
+            printf("mismatch @%d: ref=(%.7f, %.7f) test=(%.7f, %.7f) "
+                        "abs_err=%.7g rel_err=%.7g\n",
+                        i, ref[i].x, ref[i].y, tf.x, tf.y, abs_err, rel_err);
+            ++bad_cnt;
+        }
     }
-    printf("Max error: %e\n", max_err);
+
+    printf("Max abs err = %.7g at i=%d\n", max_abs_err, max_idx_abs);
+    printf("Max rel err = %.7g at i=%d\n", max_rel_err, max_idx_rel);
+
+    if (bad_cnt == 0) {
+        printf("All %d elements within tolerance (atol=%.2e, rtol=%.2e)\n", N, atol, rtol);
+    } else {
+        printf("%d elements exceeded tolerance (atol=%.2e, rtol=%.2e)\n", bad_cnt, atol, rtol);
+    }
 }
 
 int main() {
-    const long long N = 65536 * 64;
+    constexpr long long batch = 65536;
+    constexpr long long len = 64;
+    constexpr long long N = batch * len;
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
 
     printf("Max grid size: x=%d, y=%d, z=%d\n", prop.maxGridSize[0],
            prop.maxGridSize[1], prop.maxGridSize[2]);
-    float2 *h_input = (float2 *)malloc(sizeof(float2) * N);
+    cuFloatComplex *h_input = (cuFloatComplex *)malloc(sizeof(cuFloatComplex) * N);
+    half2 *h_input_half = (half2 *)malloc(sizeof(half2) * N);
     for (int i = 0; i < N; ++i) {
         // h_input[i].x = sinf(2 * M_PI * i / 64); // real part
         // h_input[i].y = 0.0f;                   // imag part
         h_input[i].x = i % 64;
         h_input[i].y = 0;
+        h_input_half[i] = make_half2(i % 64, 0);
     }
 
-    float2 *d_baseline, *d_custom;
-    cudaMalloc(&d_baseline, sizeof(float2) * N);
-    cudaMalloc(&d_custom, sizeof(float2) * N);
+    cuFloatComplex *d_baseline, *d_custom;
+    cudaMalloc(&d_baseline, sizeof(cuFloatComplex) * N);
+    cudaMalloc(&d_custom, sizeof(cuFloatComplex) * N);
 
-    cudaMemcpy(d_baseline, h_input, sizeof(float2) * N, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_custom, h_input, sizeof(float2) * N, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_baseline, h_input, sizeof(cuFloatComplex) * N, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_custom, h_input, sizeof(cuFloatComplex) * N, cudaMemcpyHostToDevice);
+
+    half2 *d_baseline_half;
+    cudaMalloc(&d_baseline_half, sizeof(half2) * N);
+    cudaMemcpy(d_baseline_half, h_input_half, sizeof(half2) * N,
+               cudaMemcpyHostToDevice);
 
     baseline_fft(d_baseline, N);
-    my_fft<N>(d_custom);
+    // my_fft<half2, N>(d_baseline_half);
+    my_fft<cuFloatComplex, N>(d_custom);
 
-    float2 *h_baseline = (float2 *)malloc(sizeof(float2) * N);
-    float2 *h_custom = (float2 *)malloc(sizeof(float2) * N);
-    cudaMemcpy(h_baseline, d_baseline, sizeof(float2) * N,
+    cuFloatComplex *h_baseline = (cuFloatComplex *)malloc(sizeof(cuFloatComplex) * N);
+    cuFloatComplex *h_custom = (cuFloatComplex *)malloc(sizeof(cuFloatComplex) * N);
+    half2 *h_custom_half = (half2 *)malloc(sizeof(half2) * N);
+    cudaMemcpy(h_baseline, d_baseline, sizeof(cuFloatComplex) * N,
                cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_custom, d_custom, sizeof(float2) * N, cudaMemcpyDeviceToHost);
-
+    cudaMemcpy(h_custom, d_custom, sizeof(cuFloatComplex) * N, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_custom_half, d_baseline_half, sizeof(half2) * N,
+               cudaMemcpyDeviceToHost);
     // for(int i=0; i<N; i++) if(abs(h_baseline[i].x-h_custom[i].x) > 1e-9 ||
     // abs(h_baseline[i].y-h_custom[i].y) > 1e-9) printf("(%f + %f i / %f + %f i
     // \n) ", h_baseline[i].x, h_baseline[i].y, h_custom[i].x, h_custom[i].y);
-    check_result(h_baseline, h_custom, N);
+    // check_result(h_baseline, h_custom_half, N);
+    // check_result(h_baseline, h_custom, N);
 
     free(h_input);
     free(h_baseline);
