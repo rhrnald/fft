@@ -240,6 +240,7 @@ __global__ void fft_kernel_half(half2* __restrict__ d_data, unsigned int inside_
     auto smem_batch1 = smem + N * (threadIdx.x / 4) + N * (batch / 2);
 
     for(int iter=0; iter<inside_repeats; iter++) {
+        
     for (unsigned int i = 0; i < LOG2N; i += 3) {
         const int stride = 1 << i;
         for(int j = 0; j < N ; j += stride * 8) {
@@ -276,26 +277,17 @@ __global__ void fft_kernel_half(half2* __restrict__ d_data, unsigned int inside_
     }
 
     }
-    // __syncthreads();
-    // if(threadIdx.x==0 && threadIdx.y==0) {
-    //     for(int i=0;i<64;i++) {
-    //         printf("%d: ", i);
-    //         for(int j=0;j<64;j++) {
-    //             printf("(%.3f,%.3f)", __half2float(smem[i*64+j].x), __half2float(smem[i*64+j].y));
-    //         }
-    //         printf("\n");
-    //     }
-    // }
-    // __syncthreads();
 
-    // --- Store: smem -> gmem (사용자 구현부) ---
-    // TODO: 최종 결과를 d_data로 내보내기
-    // ...
+    for(int j=0; j<batch; j++) {
+        for (int i = threadIdx.x; i < N; i+=warp_size) {
+            d_data[i + N * j +threadIdx.y * N * batch + blockIdx.x * blockDim.y * (N * batch)] = smem[i+ N * j];
+        }
+    }
 }
 
 template<unsigned int N>
-void my_fft_sm_half(half2 *d_data, unsigned int B) {
-    static constexpr unsigned int inside_repeats = 1000;
+void my_fft_sm_half_perf(half2 *d_data, unsigned int B) {
+    static constexpr unsigned int inside_repeats = 10000;
     static constexpr unsigned int kernel_runs    = 1;
     static constexpr unsigned int warm_up_runs   = 0;
 
@@ -361,6 +353,30 @@ void my_fft_sm_half(half2 *d_data, unsigned int B) {
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    // std::cout << "elapsed_time_repeat: " << elapsed_time_repeat << std::endl;
     printf("computation time: %.8f ms\n", (elapsed_time_repeatx2-elapsed_time_repeat)/inside_repeats);
+}
+
+template<unsigned int N>
+void my_fft_sm_half_val(half2 *d_data, unsigned int B) {
+    static constexpr unsigned int inside_repeats = 1;
+    static constexpr unsigned int kernel_runs    = 1;
+    static constexpr unsigned int warm_up_runs   = 0;
+
+    cudaStream_t stream;
+    CHECK_CUDA(cudaStreamCreate(&stream));
+
+    static constexpr unsigned int warp_per_block = 4;
+
+    double elapsed_time_repeat = measure_execution_ms(
+        [&](cudaStream_t stream) {
+            fft_kernel_half<N,6,false><<<B / (16 * warp_per_block), dim3(32, warp_per_block), 16*N*sizeof(half2)*warp_per_block, stream>>>(d_data, inside_repeats);
+            // assert("4096 half is not supported" && false);
+        },
+        warm_up_runs,
+        kernel_runs,
+        stream);
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    printf("computation(once) time: %.8f ms\n", elapsed_time_repeat);
 }

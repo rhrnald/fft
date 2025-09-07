@@ -59,6 +59,7 @@ int main() {
 
     printf("Max grid size: x=%d, y=%d, z=%d\n", prop.maxGridSize[0],
            prop.maxGridSize[1], prop.maxGridSize[2]);
+
     cuFloatComplex *h_input = (cuFloatComplex *)malloc(sizeof(cuFloatComplex) * N);
     half2 *h_input_half = (half2 *)malloc(sizeof(half2) * N);
     for (int i = 0; i < N; ++i) {
@@ -70,34 +71,44 @@ int main() {
     }
 
     cuFloatComplex *d_baseline, *d_custom;
+    half2 *d_baseline_half, *d_custom_half;
+
     cudaMalloc(&d_baseline, sizeof(cuFloatComplex) * N);
     cudaMalloc(&d_custom, sizeof(cuFloatComplex) * N);
+    cudaMalloc(&d_baseline_half, sizeof(half2) * N);
+    cudaMalloc(&d_custom_half, sizeof(half2) * N);
 
     cudaMemcpy(d_baseline, h_input, sizeof(cuFloatComplex) * N, cudaMemcpyHostToDevice);
     cudaMemcpy(d_custom, h_input, sizeof(cuFloatComplex) * N, cudaMemcpyHostToDevice);
-
-    half2 *d_baseline_half;
-    cudaMalloc(&d_baseline_half, sizeof(half2) * N);
     cudaMemcpy(d_baseline_half, h_input_half, sizeof(half2) * N,
+               cudaMemcpyHostToDevice);
+    cudaMemcpy(d_custom_half, h_input_half, sizeof(half2) * N,
                cudaMemcpyHostToDevice);
 
     baseline_fft(d_baseline, N);
     // my_fft<half2, N>(d_baseline_half);
-    my_fft_sm_half<len>(d_baseline_half, batch);
+    my_fft_sm_half_val<len>(d_custom_half, batch);
 
     cuFloatComplex *h_baseline = (cuFloatComplex *)malloc(sizeof(cuFloatComplex) * N);
     cuFloatComplex *h_custom = (cuFloatComplex *)malloc(sizeof(cuFloatComplex) * N);
+    half2 *h_baseline_half = (half2 *)malloc(sizeof(half2) * N);
     half2 *h_custom_half = (half2 *)malloc(sizeof(half2) * N);
+
     cudaMemcpy(h_baseline, d_baseline, sizeof(cuFloatComplex) * N,
                cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_custom, d_custom, sizeof(cuFloatComplex) * N, cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_custom_half, d_baseline_half, sizeof(half2) * N,
+    // cudaMemcpy(h_custom, d_custom, sizeof(cuFloatComplex) * N, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_baseline_half, d_baseline_half, sizeof(half2) * N,
                cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_custom_half, d_custom_half, sizeof(half2) * N,
+               cudaMemcpyDeviceToHost);
+
     // for(int i=0; i<N; i++) if(abs(h_baseline[i].x-h_custom[i].x) > 1e-9 ||
     // abs(h_baseline[i].y-h_custom[i].y) > 1e-9) printf("(%f + %f i / %f + %f i
     // \n) ", h_baseline[i].x, h_baseline[i].y, h_custom[i].x, h_custom[i].y);
-    // check_result(h_baseline, h_custom_half, N);
+    check_result(h_baseline, h_custom_half, N);
     // check_result(h_baseline, h_custom, N);
+
+    my_fft_sm_half_perf<len>(d_custom_half, batch);
 
     free(h_input);
     free(h_baseline);
