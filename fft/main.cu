@@ -2,6 +2,7 @@
 #include <stdio.h>
 
 #include "my_fft.h"
+#include "my_fft_sm.h"
 
 void baseline_fft(float2 *d_data, int N);
 
@@ -50,7 +51,7 @@ void check_result(const float2* ref, const half2* test, int N,
 }
 
 int main() {
-    constexpr long long batch = 65536;
+    constexpr long long batch = 64;
     constexpr long long len = 64;
     constexpr long long N = batch * len;
     cudaDeviceProp prop;
@@ -82,7 +83,7 @@ int main() {
 
     baseline_fft(d_baseline, N);
     // my_fft<half2, N>(d_baseline_half);
-    my_fft<cuFloatComplex, N>(d_custom);
+    my_fft_sm_half<len>(d_baseline_half, batch);
 
     cuFloatComplex *h_baseline = (cuFloatComplex *)malloc(sizeof(cuFloatComplex) * N);
     cuFloatComplex *h_custom = (cuFloatComplex *)malloc(sizeof(cuFloatComplex) * N);

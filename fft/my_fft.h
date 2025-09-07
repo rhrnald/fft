@@ -18,6 +18,8 @@
         }                                                                      \
     } while (0)
 
+#define PI 3.14159265358979323846f
+
 template <int N> __device__ int reverse_2bit_groups(int x) {
     int num_groups = N / 2;
     int result = 0;
@@ -59,8 +61,6 @@ void my_fft(T *d_data) {
             static_assert(!std::is_same_v<T,T>, "Unsupported T");
         }
     };
-
-    const float PI = 3.14159265358979323846f;
 
     for (int i = 0; i < 64; ++i) {
         float theta = -2.0f * PI * i / 64.0f;
