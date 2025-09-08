@@ -147,53 +147,34 @@ __device__ __forceinline__ void fill_reg_b(half2 _b[], int stride, int k) {
     // auto w3 = W(2*i*(k+stride*(j+4)),8*stride);
     // auto w4 = W((2*i+1)*(k+stride*(j+4)),8*stride);
 
-    
-    auto w1 = W((i)*(k+stride*j),8*stride);
-    auto w2 = W((i+4)*(k+stride*j),8*stride);
-    auto w3 = W((i)*(k+stride*(j+4)),8*stride);
-    auto w4 = W((i+4)*(k+stride*(j+4)),8*stride);
+
+    auto w1 = W((i)*(k+stride*j)+(2*stride * ((threadIdx.x/4)&1)),8*stride);
+    auto w2 = W((i+4)*(k+stride*j)+(2*stride * ((threadIdx.x/4)&1)),8*stride);
+    auto w3 = (i&1)? half2(-w1.x, -w1.y) : half2(w1.x, w1.y);
+    auto w4 = (i&1)? half2(-w2.x, -w2.y) : half2(w2.x, w2.y);
+
+    // auto w3 = W((i)*(k+stride*(j+4))+(2*stride * ((threadIdx.x/4)&1)),8*stride);
+    // auto w4 = W((i+4)*(k+stride*(j+4))+(2*stride * ((threadIdx.x/4)&1)),8*stride);
     // printf("threadIdx.x: %d, i: %d, j: %d, 2*i*(k+stride*j): %d, w1: (%f, %f), w2: (%f, %f)\n", threadIdx.x, i, j, 2*i*(k+stride*j), w1.x,w1.y, w2.x,w2.y);
 
     if constexpr (!inverse) {
-        if ((threadIdx.x / 4) & 1) {
-            b[0] = __float2half(w1.y);
-            b[1] = __float2half(w1.x);
-            b[2] = __float2half(w2.y);
-            b[3] = __float2half(w2.x);
-            b[4] = __float2half(w3.y);
-            b[5] = __float2half(w3.x);
-            b[6] = __float2half(w4.y);
-            b[7] = __float2half(w4.x);
-        } else {
-            b[0] = __float2half(w1.x);
-            b[1] = __float2half(-w1.y);
-            b[2] = __float2half(w2.x);
-            b[3] = __float2half(-w2.y);
-            b[4] = __float2half(w3.x);
-            b[5] = __float2half(-w3.y);
-            b[6] = __float2half(w4.x);
-            b[7] = __float2half(-w4.y);
-        }
+        b[0] = __float2half(w1.x);
+        b[1] = __float2half(-w1.y);
+        b[2] = __float2half(w2.x);
+        b[3] = __float2half(-w2.y);
+        b[4] = __float2half(w3.x);
+        b[5] = __float2half(-w3.y);
+        b[6] = __float2half(w4.x);
+        b[7] = __float2half(-w4.y);
     } else {
-        if ((threadIdx.x / 4) & 1) {
-            b[0] = __float2half(-w1.y);
-            b[1] = __float2half(w1.x);
-            b[2] = __float2half(-w2.y);
-            b[3] = __float2half(w2.x);
-            b[4] = __float2half(-w3.y);
-            b[5] = __float2half(w3.x);
-            b[6] = __float2half(-w4.y);
-            b[7] = __float2half(w4.x);
-        } else {
-            b[0] = __float2half(w1.x);
-            b[1] = __float2half(w1.y);
-            b[2] = __float2half(w2.x);
-            b[3] = __float2half(w2.y);
-            b[4] = __float2half(w3.x);
-            b[5] = __float2half(w3.y);
-            b[6] = __float2half(w4.x);
-            b[7] = __float2half(w4.y);
-        }
+        b[0] = __float2half(w1.x);
+        b[1] = __float2half(w1.y);
+        b[2] = __float2half(w2.x);
+        b[3] = __float2half(w2.y);
+        b[4] = __float2half(w3.x);
+        b[5] = __float2half(w3.y);
+        b[6] = __float2half(w4.x);
+        b[7] = __float2half(w4.y);
     }
 }
 
