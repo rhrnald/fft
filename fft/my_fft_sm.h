@@ -222,10 +222,16 @@ __global__ void fft_kernel_half(half2* __restrict__ d_data, unsigned int inside_
 
     for(int iter=0; iter<inside_repeats; iter++) {
         
+    #pragma unroll
     for (unsigned int i = 0; i < LOG2N; i += 3) {
         const int stride = 1 << i;
-        for(int j = 0; j < N ; j += stride * 8) {
-            for(int k=0; k<stride; k++) {
+        #pragma unroll
+        for(int jk = 0; jk < N/8; jk++) {
+            int j = (jk/stride)*stride*8;
+            int k = jk%stride;
+        // for(int j = 0; j < N ; j += stride * 8) {
+        //     #pragma unroll 8
+        //     for(int k=0; k<stride; k++) {
                 // j+k, j+k+stride, j+k+2*stride, j+k+3*stride, j+k+4*stride, j+k+5*stride, j+k+6*stride, j+k+7*stride
                 // MMA input/output fragments
                 half2 reg_frag_a[element_per_frag];
@@ -252,7 +258,7 @@ __global__ void fft_kernel_half(half2* __restrict__ d_data, unsigned int inside_
 
                 smem_batch1[j + k + stride * ((threadIdx.x%4))] = reg_frag_d[1];
                 smem_batch1[j + k + stride * ((threadIdx.x%4)+4)] = reg_frag_d[3];
-            }
+            // }
         }
         __syncwarp();
     }
@@ -325,7 +331,7 @@ void my_fft_sm_half_perf(half2 *d_data, unsigned int B) {
 
     double elapsed_time_repeatx2 = measure_execution_ms(
         [&](cudaStream_t stream) {
-            fft_kernel_half<N,6,false><<<B / (16 * warp_per_block), 32 * warp_per_block, 16*N*sizeof(half2)*warp_per_block, stream>>>(d_data, 2 * inside_repeats);
+            fft_kernel_half<N,6,false><<<B / (16 * warp_per_block), dim3(32, warp_per_block), 16*N*sizeof(half2)*warp_per_block, stream>>>(d_data, 2 * inside_repeats);
             // assert("4096 half is not supported" && false);
         },
         warm_up_runs,

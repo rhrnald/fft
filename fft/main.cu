@@ -51,7 +51,7 @@ void check_result(const float2* ref, const half2* test, int N,
 }
 
 int main() {
-    constexpr long long batch = 64;
+    constexpr long long batch = 65536;
     constexpr long long len = 64;
     constexpr long long N = batch * len;
     cudaDeviceProp prop;
