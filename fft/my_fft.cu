@@ -148,12 +148,12 @@ static __device__ void mma_m16n8k8_fp16_fp16_rowcol(unsigned int d[2], const uns
 static __device__ void mma_m16n8k8_tf32_f32_rowcol(float d[4], const float a[4],
                                                    const float b[2],
                                                    const float c[4]) {
-    auto a0 = (unsigned int)(a[0]);
-    auto a1 = (unsigned int)(a[1]);
-    auto a2 = (unsigned int)(a[2]);
-    auto a3 = (unsigned int)(a[3]);
-    auto b0 = (unsigned int)(b[0]);
-    auto b1 = (unsigned int)(b[1]);
+    auto a0 = __float_as_uint(a[0]);
+    auto a1 = __float_as_uint(a[1]);
+    auto a2 = __float_as_uint(a[2]);
+    auto a3 = __float_as_uint(a[3]);
+    auto b0 = __float_as_uint(b[0]);
+    auto b1 = __float_as_uint(b[1]);
     asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32 "
                  "{%0, %1, %2, %3}, "      // D (also C)
                  "{%4, %5, %6, %7}, "      // A (tf32 in .b32 regs)
