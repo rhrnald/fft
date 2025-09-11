@@ -1,7 +1,7 @@
 # === 설정 ===
 NVCC        := nvcc
 TARGET      := fft
-SRC_FILES   := main.cu baseline_fft.cu my_fft.cu
+SRC_FILES   := main.cu baseline_cufft.cu my_fft.cu
 CUFFT_LIBS  := -lcufft
 ARCH_FLAGS  := -gencode arch=compute_80,code=sm_80
 INCLUDE_DIR := -I../
