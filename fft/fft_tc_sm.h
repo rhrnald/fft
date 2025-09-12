@@ -43,6 +43,8 @@ template <> struct vec2_of<half>  { using type = half2;  };
 template <class T>
 using vec2_t = typename vec2_of<std::remove_cv_t<T>>::type;
 
+
+
 template <int r, int N> __device__ int reverse_bit_groups(int x) {
     int num_groups = N / r;
     int result = 0;

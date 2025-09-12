@@ -174,6 +174,42 @@ __device__ void permute_radix4_local(T &a, T &b, T &c, T &d, int pattern) {
     d=tmp[(pattern-3)&3];
 }
 template <typename T>
+__device__ void permute_radix4_branch(T &a, T &b, T &c, T &d, int pattern) {
+    if(pattern==0 || pattern==3) {
+        T tmp = b;
+        b = d;
+        d = tmp;
+    }
+    if(pattern==1 || pattern==3) {
+        T tmp = a;
+        a = c;
+        c = tmp;
+    }
+    if(pattern==2 || pattern==3) {
+        T tmp = a;
+        a = b;
+        b = tmp;
+
+        tmp = c;
+        c = d;
+        d = tmp;
+    }
+}
+template <typename T>
+__device__ void permute_radix4_arith(T &a, T &b, T &c, T &d, int pattern) {
+    float tmp[4] = {a.x,b.x,c.x,d.x};
+    a.x = tmp[0]*(pattern==0) + tmp[1]*(pattern==1) + tmp[2]*(pattern==2) + tmp[3]*(pattern==3);
+    b.x = tmp[3]*(pattern==0) + tmp[0]*(pattern==1) + tmp[1]*(pattern==2) + tmp[2]*(pattern==3);
+    c.x = tmp[2]*(pattern==0) + tmp[3]*(pattern==1) + tmp[0]*(pattern==2) + tmp[1]*(pattern==3);
+    d.x = tmp[1]*(pattern==0) + tmp[2]*(pattern==1) + tmp[3]*(pattern==2) + tmp[0]*(pattern==3);
+
+    float tmp2[4] = {a.y,b.y,c.y,d.y};
+    a.y = tmp2[0]*(pattern==0) + tmp2[1]*(pattern==1) + tmp2[2]*(pattern==2) + tmp2[3]*(pattern==3);
+    b.y = tmp2[3]*(pattern==0) + tmp2[0]*(pattern==1) + tmp2[1]*(pattern==2) + tmp2[2]*(pattern==3);
+    c.y = tmp2[2]*(pattern==0) + tmp2[3]*(pattern==1) + tmp2[0]*(pattern==2) + tmp2[1]*(pattern==3);
+    d.y = tmp2[1]*(pattern==0) + tmp2[2]*(pattern==1) + tmp2[3]*(pattern==2) + tmp2[0]*(pattern==3);
+}
+template <typename T>
 __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     // version 0
     // T t0 = a, t1 = b, t2 = c, t3 = d;
@@ -207,6 +243,25 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     //     d = t0;
     //     break;
     // }
+    if(pattern==0 || pattern==3) {
+        T tmp = b;
+        b = d;
+        d = tmp;
+    }
+    if(pattern==1 || pattern==3) {
+        T tmp = a;
+        a = c;
+        c = tmp;
+    }
+    if(pattern==2 || pattern==3) {
+        T tmp = a;
+        a = b;
+        b = tmp;
+
+        tmp = c;
+        c = d;
+        d = tmp;
+    }
 
     // version 1
     // T tmp[4] = {a,b,c,d};
@@ -269,17 +324,17 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     // a.y = y[0].x, b.y=y[0].y, c.y=y[1].x, d.y=y[1].y;
     //version 5
 
-    float tmp[4] = {a.x,b.x,c.x,d.x};
-    a.x = tmp[0]*(pattern==0) + tmp[1]*(pattern==1) + tmp[2]*(pattern==2) + tmp[3]*(pattern==3);
-    b.x = tmp[3]*(pattern==0) + tmp[0]*(pattern==1) + tmp[1]*(pattern==2) + tmp[2]*(pattern==3);
-    c.x = tmp[2]*(pattern==0) + tmp[3]*(pattern==1) + tmp[0]*(pattern==2) + tmp[1]*(pattern==3);
-    d.x = tmp[1]*(pattern==0) + tmp[2]*(pattern==1) + tmp[3]*(pattern==2) + tmp[0]*(pattern==3);
+    // float tmp[4] = {a.x,b.x,c.x,d.x};
+    // a.x = tmp[0]*(pattern==0) + tmp[1]*(pattern==1) + tmp[2]*(pattern==2) + tmp[3]*(pattern==3);
+    // b.x = tmp[3]*(pattern==0) + tmp[0]*(pattern==1) + tmp[1]*(pattern==2) + tmp[2]*(pattern==3);
+    // c.x = tmp[2]*(pattern==0) + tmp[3]*(pattern==1) + tmp[0]*(pattern==2) + tmp[1]*(pattern==3);
+    // d.x = tmp[1]*(pattern==0) + tmp[2]*(pattern==1) + tmp[3]*(pattern==2) + tmp[0]*(pattern==3);
 
-    float tmp2[4] = {a.y,b.y,c.y,d.y};
-    a.y = tmp2[0]*(pattern==0) + tmp2[1]*(pattern==1) + tmp2[2]*(pattern==2) + tmp2[3]*(pattern==3);
-    b.y = tmp2[3]*(pattern==0) + tmp2[0]*(pattern==1) + tmp2[1]*(pattern==2) + tmp2[2]*(pattern==3);
-    c.y = tmp2[2]*(pattern==0) + tmp2[3]*(pattern==1) + tmp2[0]*(pattern==2) + tmp2[1]*(pattern==3);
-    d.y = tmp2[1]*(pattern==0) + tmp2[2]*(pattern==1) + tmp2[3]*(pattern==2) + tmp2[0]*(pattern==3);
+    // float tmp2[4] = {a.y,b.y,c.y,d.y};
+    // a.y = tmp2[0]*(pattern==0) + tmp2[1]*(pattern==1) + tmp2[2]*(pattern==2) + tmp2[3]*(pattern==3);
+    // b.y = tmp2[3]*(pattern==0) + tmp2[0]*(pattern==1) + tmp2[1]*(pattern==2) + tmp2[2]*(pattern==3);
+    // c.y = tmp2[2]*(pattern==0) + tmp2[3]*(pattern==1) + tmp2[0]*(pattern==2) + tmp2[1]*(pattern==3);
+    // d.y = tmp2[1]*(pattern==0) + tmp2[2]*(pattern==1) + tmp2[3]*(pattern==2) + tmp2[0]*(pattern==3);
 }
 
 // in-place device kernel
@@ -348,7 +403,7 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
                 // 7  4  5  6       13 1  5  9
                 // 10 11 8  9	->  10 14 2  6
                 // 13 14 15 12		7  11 15 3
-                permute_radix4(reg[k + j], reg[k + j + stride],
+                permute_radix4_local(reg[k + j], reg[k + j + stride],
                                 reg[k + j + stride * 2],
                                 reg[k + j + stride * 3], laneid & 3);
             }
@@ -363,7 +418,7 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
                 // 7  4  5  6       13 1  5  9
                 // 10 11 8  9	->  10 14 2  6
                 // 13 14 15 12		7  11 15 3
-                permute_radix4(reg[k + j], reg[k + j + stride],
+                permute_radix4_branch(reg[k + j], reg[k + j + stride],
                                 reg[k + j + stride * 2],
                                 reg[k + j + stride * 3], laneid & 3);
             }
@@ -571,30 +626,32 @@ fft_kernel_radix64_batch16(cuFloatComplex *d_data,
     // }
 
     for(unsigned int i=0; i<repeat; i++) {
-    //         for (int i = 0; i < ept / 2; i++) {
-    //     reg[i] = s_data[(laneid / 2) * (warp_size + 1) +
-    //                     reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
-    //     reg[i + ept / 2] =
-    //         s_data[(ept / 2) * (warp_size + 1) +
-    //                (laneid / 2) * (warp_size + 1) + reverse_2bit_groups<4>(i) +
-    //                (ept / 2) * (laneid % 2)];
-    // }
+        for (int i = 0; i < ept / 2; i++) {
+            reg[i] = s_data[(laneid / 2) * (warp_size + 1) +
+                            reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
+            reg[i + ept / 2] =
+                s_data[(ept / 2) * (warp_size + 1) +
+                    (laneid / 2) * (warp_size + 1) + reverse_2bit_groups<4>(i) +
+                    (ept / 2) * (laneid % 2)];
+        }
+
         fft_kernel_r64_b16<64>(reg, W_64);
-    //         for (int i = 0; i < ept / 2; i++) {
+
+        for (int i = 0; i < ept / 2; i++) {
+            s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] = reg[i];
+            s_data[(ept / 2) * (warp_size + 1) + (warp_size + 1) * (laneid / 2) +
+                16 * (laneid % 2) + i] = reg[i + ept / 2];
+        }
+        __syncwarp();
+    }
+
+    // write to smem
+    // for (int i = 0; i < ept / 2; i++) {
     //     s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] = reg[i];
     //     s_data[(ept / 2) * (warp_size + 1) + (warp_size + 1) * (laneid / 2) +
     //            16 * (laneid % 2) + i] = reg[i + ept / 2];
     // }
     // __syncwarp();
-    }
-
-    // write to smem
-    for (int i = 0; i < ept / 2; i++) {
-        s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] = reg[i];
-        s_data[(ept / 2) * (warp_size + 1) + (warp_size + 1) * (laneid / 2) +
-               16 * (laneid % 2) + i] = reg[i + ept / 2];
-    }
-    __syncwarp();
 
     // write to gmem
     for (int i = 0; i < ept; i++)

@@ -110,11 +110,11 @@ int main() {
                cudaMemcpyHostToDevice);
 
     baseline_fft(d_baseline, len, batch, N);
-    // my_fft<float2, N>(d_baseline);
+    my_fft<float2, N>(d_baseline);
 
     
-    fft_tc_sm_val<half, len, 8>(d_custom_half, batch);
-    fft_tc_sm_val<float, len, 8>(d_custom, batch);
+    // fft_tc_sm_val<half, len, 8>(d_custom_half, batch);
+    // fft_tc_sm_val<float, len, 8>(d_custom, batch);
 
 
     cuFloatComplex *h_baseline = (cuFloatComplex *)malloc(sizeof(cuFloatComplex) * N);
@@ -128,11 +128,11 @@ int main() {
     cudaMemcpy(h_custom_half, d_custom_half, sizeof(half2) * N,
                cudaMemcpyDeviceToHost);
 
-    printf("[val] half N=64 radix=8 max abs err = %.7g\n", check_max_abs_err(h_baseline, h_custom_half, N));
-    printf("[val] float N=64 radix=8 max abs err = %.7g\n", check_max_abs_err(h_baseline, h_custom, N));
+    // printf("[val] half N=64 radix=8 max abs err = %.7g\n", check_max_abs_err(h_baseline, h_custom_half, N));
+    // printf("[val] float N=64 radix=8 max abs err = %.7g\n", check_max_abs_err(h_baseline, h_custom, N));
 
-    fft_tc_sm_perf<half, len, 8>(d_custom_half, batch);
-    fft_tc_sm_perf<float, len, 8>(d_custom, batch);
+    // fft_tc_sm_perf<half, len, 8>(d_custom_half, batch);
+    // fft_tc_sm_perf<float, len, 8>(d_custom, batch);
 
     free(h_input);
     free(h_baseline);
