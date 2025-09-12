@@ -7,10 +7,9 @@
 #include <cuda_fp16.h>
 #include <mma.h>
 
-#include "utils/helper.h"
+#include "utils.h"
 #include "my_fft.h"
 
-#define PI 3.14159265358979323846f
 
 #define TC_M_DEVICE_CONST 16
 #define TC_N_DEVICE_CONST 8

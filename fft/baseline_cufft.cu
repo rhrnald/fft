@@ -2,6 +2,9 @@
 #include <cufft.h>
 #include <stdio.h>
 
+#include "helper.h"
+#include "stat.h"
+
 #define CHECK_CUDA(call)                                                       \
     do {                                                                       \
         cudaError_t err = call;                                                \
@@ -22,23 +25,46 @@
         }                                                                      \
     } while (0)
 
-void baseline_fft(float2 *d_data, int len, int batch, int N) {
+void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch) {
+    printf("running baseline (type=float, N=%d, batch=%d)\n", N, batch);
+    static constexpr unsigned int kernel_runs    = 10;
+    static constexpr unsigned int warm_up_runs   = 1;
+
+    cudaStream_t stream;
+    CHECK_CUDA(cudaStreamCreate(&stream));
+
+    float2 *d_input, *d_output;
+    cudaMalloc(&d_input, sizeof(float2) * N * batch);
+    cudaMalloc(&d_output, sizeof(float2) * N * batch);
+    cudaMemcpy(d_input, h_input, sizeof(float2) * N * batch, cudaMemcpyHostToDevice);
+
     cufftHandle plan;
-    cufftPlan1d(&plan, len, CUFFT_C2C, batch);
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start);
-    cufftExecC2C(plan, (cufftComplex *)d_data, (cufftComplex *)d_data,
+    cufftPlan1d(&plan, N, CUFFT_C2C, batch);
+
+    double elapsedTime = measure_execution_ms(
+        [&](cudaStream_t stream) {
+            cufftExecC2C(plan, (cufftComplex *)d_input, (cufftComplex *)d_output,
                  CUFFT_FORWARD);
-    cudaEventRecord(stop);
-    cudaDeviceSynchronize();
-    float elapsedTime;
-    cudaEventElapsedTime(&elapsedTime, start, stop);
-    printf("Baseline FFT Time taken: %f ms\n", elapsedTime);
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-    // cufftExecC2C(plan, (cufftComplex*)d_data, (cufftComplex*)d_data,
-    // CUFFT_INVERSE);
+            // assert("4096 half is not supported" && false);
+        },
+        warm_up_runs,
+        kernel_runs,
+        stream);
+
+
+    cudaMemcpy(h_output, d_output, sizeof(float2) * N * batch, cudaMemcpyDeviceToHost);
+
+    stat::push(stat::RunStat{
+        /*type*/     "baseline",              // 자유롭게 "cufft" 등으로 바꿔도 됨
+        /*N*/        static_cast<unsigned>(N),
+        /*radix*/    0,                       // baseline이라 없음
+        /*B*/        static_cast<unsigned>(batch),
+        /*max_err*/  0.0,                     // 요청대로 0
+        /*comp_ms*/  0.0,                     // 요청대로 0
+        /*e2e_ms*/   elapsedTime              // 측정값 사용
+    });
+
+    cudaFree(d_input);
+    cudaFree(d_output);
     cufftDestroy(plan);
 }

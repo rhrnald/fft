@@ -6,7 +6,8 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <iostream>
-#include "utils/helper.h"
+
+#include "utils.h"
 
 #define CHECK_CUDA(call)                                                       \
     do {                                                                       \
@@ -17,8 +18,6 @@
             exit(EXIT_FAILURE);                                                \
         }                                                                      \
     } while (0)
-
-#define PI 3.14159265358979323846f
 
 template <int N> __device__ int reverse_2bit_groups(int x) {
     int num_groups = N / 2;
