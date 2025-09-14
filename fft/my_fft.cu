@@ -7,9 +7,8 @@
 #include <cuda_fp16.h>
 #include <mma.h>
 
-#include "utils.h"
 #include "my_fft.h"
-
+#include "utils.h"
 
 #define TC_M_DEVICE_CONST 16
 #define TC_N_DEVICE_CONST 8
@@ -38,8 +37,9 @@
 // }
 
 template <unsigned int N, bool inverse>
-__device__ void fill_reg_b_half(half2 b[1], int stride_log2, int stride, int i_perm, int j_perm, int k,
-                           const half2* __restrict__ W_ptr) {
+__device__ void fill_reg_b_half(half2 b[1], int stride_log2, int stride,
+                                int i_perm, int j_perm, int k,
+                                const half2 *__restrict__ W_ptr) {
     // b = [ w^ (i+i_perm) ( k + N(j+j_perm)) ] ^ T
 
     // register mapping
@@ -52,7 +52,8 @@ __device__ void fill_reg_b_half(half2 b[1], int stride_log2, int stride, int i_p
 
     // auto w = W(j*(k+stride*i),4*stride);
     constexpr unsigned int N_log2 = (N == 64) ? 4 : 10;
-    int index = (1 << (N_log2 - stride_log2)) * ((j * (k + stride * i)) & (4 * stride - 1));
+    int index = (1 << (N_log2 - stride_log2)) *
+                ((j * (k + stride * i)) & (4 * stride - 1));
     const half2 w = W_ptr[index];
 
     if constexpr (!inverse) {
@@ -100,8 +101,8 @@ __device__ void fill_reg_b(float b[], int stride_log2, int stride, int i_perm,
 
     // auto w = W(j*(k+stride*i),4*stride);
     constexpr unsigned int N_log2 = (N == 64) ? 4 : 10;
-    int index =
-        (1 << (N_log2 - stride_log2)) * ((j * (k + stride * i)) & (4 * stride - 1));
+    int index = (1 << (N_log2 - stride_log2)) *
+                ((j * (k + stride * i)) & (4 * stride - 1));
 
     // if ((threadIdx.x / 4) & 1) {
     //     index = (7*N/4 - index)%N;
@@ -131,17 +132,17 @@ __device__ void fill_reg_b(float b[], int stride_log2, int stride, int i_perm,
     // }
 }
 
-static __device__ void mma_m16n8k8_fp16_fp16_rowcol(unsigned int d[2], const unsigned int a[2],
-                                                   const unsigned int b[1],
-                                                   const unsigned int c[2]) {
+static __device__ void mma_m16n8k8_fp16_fp16_rowcol(unsigned int d[2],
+                                                    const unsigned int a[2],
+                                                    const unsigned int b[1],
+                                                    const unsigned int c[2]) {
     asm volatile("mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
                  "{%0, %1}, "
                  "{%2, %3}, "
                  "{%4}, "
                  "{%5, %6};\n"
                  : "=r"(d[0]), "=r"(d[1])
-                 : "r"(a[0]), "r"(a[1]), "r"(b[0]),
-                   "r"(c[0]), "r"(c[1]));
+                 : "r"(a[0]), "r"(a[1]), "r"(b[0]), "r"(c[0]), "r"(c[1]));
 }
 
 static __device__ void mma_m16n8k8_tf32_f32_rowcol(float d[4], const float a[4],
@@ -165,26 +166,26 @@ static __device__ void mma_m16n8k8_tf32_f32_rowcol(float d[4], const float a[4],
 
 template <typename T>
 __device__ void permute_radix4_local(T &a, T &b, T &c, T &d, int pattern) {
-        // version 1
-    T tmp[4] = {a,b,c,d};
-    a=tmp[pattern];
-    b=tmp[(pattern-1)&3];
-    c=tmp[(pattern-2)&3];
-    d=tmp[(pattern-3)&3];
+    // version 1
+    T tmp[4] = {a, b, c, d};
+    a = tmp[pattern];
+    b = tmp[(pattern - 1) & 3];
+    c = tmp[(pattern - 2) & 3];
+    d = tmp[(pattern - 3) & 3];
 }
 template <typename T>
 __device__ void permute_radix4_branch(T &a, T &b, T &c, T &d, int pattern) {
-    if(pattern==0 || pattern==3) {
+    if (pattern == 0 || pattern == 3) {
         T tmp = b;
         b = d;
         d = tmp;
     }
-    if(pattern==1 || pattern==3) {
+    if (pattern == 1 || pattern == 3) {
         T tmp = a;
         a = c;
         c = tmp;
     }
-    if(pattern==2 || pattern==3) {
+    if (pattern == 2 || pattern == 3) {
         T tmp = a;
         a = b;
         b = tmp;
@@ -196,17 +197,25 @@ __device__ void permute_radix4_branch(T &a, T &b, T &c, T &d, int pattern) {
 }
 template <typename T>
 __device__ void permute_radix4_arith(T &a, T &b, T &c, T &d, int pattern) {
-    float tmp[4] = {a.x,b.x,c.x,d.x};
-    a.x = tmp[0]*(pattern==0) + tmp[1]*(pattern==1) + tmp[2]*(pattern==2) + tmp[3]*(pattern==3);
-    b.x = tmp[3]*(pattern==0) + tmp[0]*(pattern==1) + tmp[1]*(pattern==2) + tmp[2]*(pattern==3);
-    c.x = tmp[2]*(pattern==0) + tmp[3]*(pattern==1) + tmp[0]*(pattern==2) + tmp[1]*(pattern==3);
-    d.x = tmp[1]*(pattern==0) + tmp[2]*(pattern==1) + tmp[3]*(pattern==2) + tmp[0]*(pattern==3);
+    float tmp[4] = {a.x, b.x, c.x, d.x};
+    a.x = tmp[0] * (pattern == 0) + tmp[1] * (pattern == 1) +
+          tmp[2] * (pattern == 2) + tmp[3] * (pattern == 3);
+    b.x = tmp[3] * (pattern == 0) + tmp[0] * (pattern == 1) +
+          tmp[1] * (pattern == 2) + tmp[2] * (pattern == 3);
+    c.x = tmp[2] * (pattern == 0) + tmp[3] * (pattern == 1) +
+          tmp[0] * (pattern == 2) + tmp[1] * (pattern == 3);
+    d.x = tmp[1] * (pattern == 0) + tmp[2] * (pattern == 1) +
+          tmp[3] * (pattern == 2) + tmp[0] * (pattern == 3);
 
-    float tmp2[4] = {a.y,b.y,c.y,d.y};
-    a.y = tmp2[0]*(pattern==0) + tmp2[1]*(pattern==1) + tmp2[2]*(pattern==2) + tmp2[3]*(pattern==3);
-    b.y = tmp2[3]*(pattern==0) + tmp2[0]*(pattern==1) + tmp2[1]*(pattern==2) + tmp2[2]*(pattern==3);
-    c.y = tmp2[2]*(pattern==0) + tmp2[3]*(pattern==1) + tmp2[0]*(pattern==2) + tmp2[1]*(pattern==3);
-    d.y = tmp2[1]*(pattern==0) + tmp2[2]*(pattern==1) + tmp2[3]*(pattern==2) + tmp2[0]*(pattern==3);
+    float tmp2[4] = {a.y, b.y, c.y, d.y};
+    a.y = tmp2[0] * (pattern == 0) + tmp2[1] * (pattern == 1) +
+          tmp2[2] * (pattern == 2) + tmp2[3] * (pattern == 3);
+    b.y = tmp2[3] * (pattern == 0) + tmp2[0] * (pattern == 1) +
+          tmp2[1] * (pattern == 2) + tmp2[2] * (pattern == 3);
+    c.y = tmp2[2] * (pattern == 0) + tmp2[3] * (pattern == 1) +
+          tmp2[0] * (pattern == 2) + tmp2[1] * (pattern == 3);
+    d.y = tmp2[1] * (pattern == 0) + tmp2[2] * (pattern == 1) +
+          tmp2[3] * (pattern == 2) + tmp2[0] * (pattern == 3);
 }
 template <typename T>
 __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
@@ -242,17 +251,17 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     //     d = t0;
     //     break;
     // }
-    if(pattern==0 || pattern==3) {
+    if (pattern == 0 || pattern == 3) {
         T tmp = b;
         b = d;
         d = tmp;
     }
-    if(pattern==1 || pattern==3) {
+    if (pattern == 1 || pattern == 3) {
         T tmp = a;
         a = c;
         c = tmp;
     }
-    if(pattern==2 || pattern==3) {
+    if (pattern == 2 || pattern == 3) {
         T tmp = a;
         a = b;
         b = tmp;
@@ -269,17 +278,20 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     // c=tmp[(pattern-2)&3];
     // d=tmp[(pattern-3)&3];
 
-    
-    //version 2 (x 2)
-    // unsigned int buf_x[2] = {__byte_perm(__float_as_uint(a.x), __float_as_uint(b.x), 0x5410),
-    //                       __byte_perm(__float_as_uint(c.x), __float_as_uint(d.x), 0x5410)};
-    // unsigned int buf_y[2] = {__byte_perm(__float_as_uint(a.x), __float_as_uint(b.x), 0x7632),
-    //                       __byte_perm(__float_as_uint(c.x), __float_as_uint(d.x), 0x7632)};
+    // version 2 (x 2)
+    // unsigned int buf_x[2] = {__byte_perm(__float_as_uint(a.x),
+    // __float_as_uint(b.x), 0x5410),
+    //                       __byte_perm(__float_as_uint(c.x),
+    //                       __float_as_uint(d.x), 0x5410)};
+    // unsigned int buf_y[2] = {__byte_perm(__float_as_uint(a.x),
+    // __float_as_uint(b.x), 0x7632),
+    //                       __byte_perm(__float_as_uint(c.x),
+    //                       __float_as_uint(d.x), 0x7632)};
 
     // auto tmp_x = (long long*)(buf_x);
-    // *tmp_x = ((*tmp_x) >> (pattern * 16)) | ((*tmp_x) << ((4 - pattern) * 16));
-    // auto tmp_y = (long long*)(buf_y);
-    // *tmp_y = ((*tmp_y) >> (pattern * 16)) | ((*tmp_y) << ((4 - pattern) * 16));
+    // *tmp_x = ((*tmp_x) >> (pattern * 16)) | ((*tmp_x) << ((4 - pattern) *
+    // 16)); auto tmp_y = (long long*)(buf_y); *tmp_y = ((*tmp_y) >> (pattern *
+    // 16)) | ((*tmp_y) << ((4 - pattern) * 16));
 
     // a.x = __byte_perm(buf_x[0], buf_y[0], 0x5410);
     // b.x = __byte_perm(buf_x[0], buf_y[0], 0x7632);
@@ -287,9 +299,10 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     // d.x = __byte_perm(buf_x[1], buf_y[1], 0x7632);
 
     // version 3
-    // half2 buf[2] = {{(((half2*)(&a))[0]).x, (*(half2*)(&(b.x))).x}, {(*(half2*)(&(c.x))).x, (*(half2*)(&(d.x))).x}};
-    // half2 buf[2] = {{(*(half2*)(&(a.x))).y, (*(half2*)(&(b.x))).y}, {(*(half2*)(&(c.x))).y, (*(half2*)(&(d.x))).y}};
-    // auto tmp = reinterpret_cast<long long*>(buf);
+    // half2 buf[2] = {{(((half2*)(&a))[0]).x, (*(half2*)(&(b.x))).x},
+    // {(*(half2*)(&(c.x))).x, (*(half2*)(&(d.x))).x}}; half2 buf[2] =
+    // {{(*(half2*)(&(a.x))).y, (*(half2*)(&(b.x))).y}, {(*(half2*)(&(c.x))).y,
+    // (*(half2*)(&(d.x))).y}}; auto tmp = reinterpret_cast<long long*>(buf);
     // *tmp = ((*tmp) >> (pattern * 16)) | ((*tmp) << ((4 - pattern) * 16));
 
     // (*(half2*)(&(a.x))).y = buf[0].x;
@@ -297,14 +310,16 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     // (*(half2*)(&(c.x))).y = buf[1].x;
     // (*(half2*)(&(d.x))).y = buf[1].y;
 
+    // printf("%.3f %.3f %.3f %.3f -> (%.3f %.3f %.3f %.3f) %.3f %.3f %.3f
+    // %.3f\n", t0.x, t1.x, t2.x, t3.x, __half2float(buf[0].x),
+    // __half2float(buf[0].y), __half2float(buf[1].x),
+    // __half2float(buf[1].y),a.x, b.x, c.x, d.x);
 
-    // printf("%.3f %.3f %.3f %.3f -> (%.3f %.3f %.3f %.3f) %.3f %.3f %.3f %.3f\n", t0.x, t1.x, t2.x, t3.x, __half2float(buf[0].x), __half2float(buf[0].y), __half2float(buf[1].x), __half2float(buf[1].y),a.x, b.x, c.x, d.x);
+    // version 4
 
-    //version 4
-    
     // float2 x[2] = {{a.x,b.x},{c.x,d.x}};
     // unsigned long long *lx = reinterpret_cast<unsigned long long*>(x);
-    
+
     // lx[0] = (lx[0] >> (pattern * 16)) | (lx[0] << (64 - pattern * 16));
     // lx[1] = (lx[1] >> (pattern * 16)) | (lx[1] << (64 - pattern * 16));
     // a.x = x[0].x, b.x=x[0].y, c.x=x[1].x, d.x=x[1].y;
@@ -321,19 +336,23 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     // ly[0] = (ly[0] >> (pattern * 16)) | (ly[0] << (64 - pattern * 16));
     // ly[1] = (ly[1] >> (pattern * 16)) | (ly[1] << (64 - pattern * 16));
     // a.y = y[0].x, b.y=y[0].y, c.y=y[1].x, d.y=y[1].y;
-    //version 5
+    // version 5
 
     // float tmp[4] = {a.x,b.x,c.x,d.x};
-    // a.x = tmp[0]*(pattern==0) + tmp[1]*(pattern==1) + tmp[2]*(pattern==2) + tmp[3]*(pattern==3);
-    // b.x = tmp[3]*(pattern==0) + tmp[0]*(pattern==1) + tmp[1]*(pattern==2) + tmp[2]*(pattern==3);
-    // c.x = tmp[2]*(pattern==0) + tmp[3]*(pattern==1) + tmp[0]*(pattern==2) + tmp[1]*(pattern==3);
-    // d.x = tmp[1]*(pattern==0) + tmp[2]*(pattern==1) + tmp[3]*(pattern==2) + tmp[0]*(pattern==3);
+    // a.x = tmp[0]*(pattern==0) + tmp[1]*(pattern==1) + tmp[2]*(pattern==2) +
+    // tmp[3]*(pattern==3); b.x = tmp[3]*(pattern==0) + tmp[0]*(pattern==1) +
+    // tmp[1]*(pattern==2) + tmp[2]*(pattern==3); c.x = tmp[2]*(pattern==0) +
+    // tmp[3]*(pattern==1) + tmp[0]*(pattern==2) + tmp[1]*(pattern==3); d.x =
+    // tmp[1]*(pattern==0) + tmp[2]*(pattern==1) + tmp[3]*(pattern==2) +
+    // tmp[0]*(pattern==3);
 
     // float tmp2[4] = {a.y,b.y,c.y,d.y};
-    // a.y = tmp2[0]*(pattern==0) + tmp2[1]*(pattern==1) + tmp2[2]*(pattern==2) + tmp2[3]*(pattern==3);
-    // b.y = tmp2[3]*(pattern==0) + tmp2[0]*(pattern==1) + tmp2[1]*(pattern==2) + tmp2[2]*(pattern==3);
-    // c.y = tmp2[2]*(pattern==0) + tmp2[3]*(pattern==1) + tmp2[0]*(pattern==2) + tmp2[1]*(pattern==3);
-    // d.y = tmp2[1]*(pattern==0) + tmp2[2]*(pattern==1) + tmp2[3]*(pattern==2) + tmp2[0]*(pattern==3);
+    // a.y = tmp2[0]*(pattern==0) + tmp2[1]*(pattern==1) + tmp2[2]*(pattern==2)
+    // + tmp2[3]*(pattern==3); b.y = tmp2[3]*(pattern==0) + tmp2[0]*(pattern==1)
+    // + tmp2[1]*(pattern==2) + tmp2[2]*(pattern==3); c.y = tmp2[2]*(pattern==0)
+    // + tmp2[3]*(pattern==1) + tmp2[0]*(pattern==2) + tmp2[1]*(pattern==3); d.y
+    // = tmp2[1]*(pattern==0) + tmp2[2]*(pattern==1) + tmp2[3]*(pattern==2) +
+    // tmp2[0]*(pattern==3);
 }
 
 // in-place device kernel
@@ -349,10 +368,10 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
         reg_frag_zero[i] = 0.0f;
 
     int laneid = threadIdx.x;
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < ITER_DEVICE_CONST; i++) {
         const int stride = 1 << (i << 1); // 4^iter;
-        #pragma unroll
+#pragma unroll
         for (int j = 0; j < N_DEVICE_CONST / RADIX_DEVICE_CONST; j++) {
             float reg_frag_a[TC_M_DEVICE_CONST * TC_K_DEVICE_CONST /
                              WARP_SIZE_DEVICE_CONST];
@@ -392,9 +411,9 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
             reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].y = reg_frag_d[3];
         }
 
-        if(i==0) {
-            for (int jk = 0; jk < 8; jk ++) {
-                int j= (jk / stride) * (4*stride);
+        if (i == 0) {
+            for (int jk = 0; jk < 8; jk++) {
+                int j = (jk / stride) * (4 * stride);
                 int k = jk % stride;
                 // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
                 // t0 t1 t2 t3
@@ -403,13 +422,13 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
                 // 10 11 8  9	->  10 14 2  6
                 // 13 14 15 12		7  11 15 3
                 permute_radix4_local(reg[k + j], reg[k + j + stride],
-                                reg[k + j + stride * 2],
-                                reg[k + j + stride * 3], laneid & 3);
+                                     reg[k + j + stride * 2],
+                                     reg[k + j + stride * 3], laneid & 3);
             }
         }
-        if(i==1) {
-            for (int jk = 0; jk < 8; jk ++) {
-                int j= (jk / stride) * (4*stride);
+        if (i == 1) {
+            for (int jk = 0; jk < 8; jk++) {
+                int j = (jk / stride) * (4 * stride);
                 int k = jk % stride;
                 // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
                 // t0 t1 t2 t3
@@ -418,8 +437,8 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
                 // 10 11 8  9	->  10 14 2  6
                 // 13 14 15 12		7  11 15 3
                 permute_radix4_branch(reg[k + j], reg[k + j + stride],
-                                reg[k + j + stride * 2],
-                                reg[k + j + stride * 3], laneid & 3);
+                                      reg[k + j + stride * 2],
+                                      reg[k + j + stride * 3], laneid & 3);
             }
         }
         /*if (i < ITER_DEVICE_CONST - 1) {
@@ -427,7 +446,8 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
             // for (int j = 0; j < 32; j += 4 * stride) {
             //     #pragma unroll
             //     for (int k = 0; k < stride; k++) {
-            //         // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
+            //         // int
+        perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
             //         // t0 t1 t2 t3
             //         // 0  1  2  3       0  4  8  12
             //         // 7  4  5  6       13 1  5  9
@@ -458,7 +478,7 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
 
 template <int N>
 __device__ void fft_kernel_r64_b16_half(half2 *reg,
-                                   const half2* __restrict__ W_ptr) {
+                                        const half2 *__restrict__ W_ptr) {
     half2 reg_frag_zero[TC_M_DEVICE_CONST * TC_N_DEVICE_CONST /
                         WARP_SIZE_DEVICE_CONST / 2];
 
@@ -493,24 +513,27 @@ __device__ void fft_kernel_r64_b16_half(half2 *reg,
             int i_perm = (j / stride) % RADIX_DEVICE_CONST;
             int k = j % stride;
 
-            fill_reg_b_half<N, false>(reg_frag_b, i * 2, stride, i_perm, j_perm, k, W_ptr);
+            fill_reg_b_half<N, false>(reg_frag_b, i * 2, stride, i_perm, j_perm,
+                                      k, W_ptr);
             // printf("%d %d %d %d %d : %f %f\n", threadIdx.x, stride, i_perm,
-            // j_perm, k, __half22float2(reg_frag_b[0]).x, __half22float2(reg_frag_b[0]).y);
+            // j_perm, k, __half22float2(reg_frag_b[0]).x,
+            // __half22float2(reg_frag_b[0]).y);
 
-            mma_m16n8k8_fp16_fp16_rowcol((unsigned int*)reg_frag_d, (unsigned int*)reg_frag_a, (unsigned int*)reg_frag_b,
-                                        (unsigned int*)reg_frag_zero);
+            mma_m16n8k8_fp16_fp16_rowcol(
+                (unsigned int *)reg_frag_d, (unsigned int *)reg_frag_a,
+                (unsigned int *)reg_frag_b, (unsigned int *)reg_frag_zero);
 
             reg[j] = reg_frag_d[0];
             reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST] = reg_frag_d[1];
         }
 
         if (i < ITER_DEVICE_CONST - 1) {
-            for(int jk=0; jk < 8; jk++) {
-                int j = (jk / stride) * (4*stride);
+            for (int jk = 0; jk < 8; jk++) {
+                int j = (jk / stride) * (4 * stride);
                 int k = jk % stride;
                 permute_radix4(reg[k + j], reg[k + j + stride],
-                                reg[k + j + stride * 2],
-                                reg[k + j + stride * 3], laneid & 3);
+                               reg[k + j + stride * 2], reg[k + j + stride * 3],
+                               laneid & 3);
             }
         }
     }
@@ -520,7 +543,8 @@ __device__ void fft_kernel_r64_b16_half(half2 *reg,
 // gridDim = batch_size / 16
 // __global__ void
 // fft_kernel_radix64_batch16_half(half2 *d_data,
-//                            const half2 *__restrict__ W_64, unsigned int repeat) {
+//                            const half2 *__restrict__ W_64, unsigned int
+//                            repeat) {
 //     // Tensor core shape
 //     constexpr int m = 16;
 //     constexpr int n = 8;
@@ -558,11 +582,12 @@ __device__ void fft_kernel_r64_b16_half(half2 *reg,
 //     __syncwarp();
 //     for (int i = 0; i < ept / 2; i++) {
 //         reg[i] = s_data[(laneid / 2) * (warp_size + 1) +
-//                         reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
+//                         reverse_2bit_groups<4>(i) + (ept / 2) * (laneid %
+//                         2)];
 //         reg[i + ept / 2] =
 //             s_data[(ept / 2) * (warp_size + 1) +
-//                    (laneid / 2) * (warp_size + 1) + reverse_2bit_groups<4>(i) +
-//                    (ept / 2) * (laneid % 2)];
+//                    (laneid / 2) * (warp_size + 1) + reverse_2bit_groups<4>(i)
+//                    + (ept / 2) * (laneid % 2)];
 //     }
 
 //     #pragma unroll 1
@@ -572,8 +597,9 @@ __device__ void fft_kernel_r64_b16_half(half2 *reg,
 
 //     // write to smem
 //     for (int i = 0; i < ept / 2; i++) {
-//         s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] = reg[i];
-//         s_data[(ept / 2) * (warp_size + 1) + (warp_size + 1) * (laneid / 2) +
+//         s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
+//         reg[i]; s_data[(ept / 2) * (warp_size + 1) + (warp_size + 1) *
+//         (laneid / 2) +
 //                16 * (laneid % 2) + i] = reg[i + ept / 2];
 //     }
 //     __syncwarp();
@@ -588,7 +614,8 @@ __device__ void fft_kernel_r64_b16_half(half2 *reg,
 // gridDim = batch_size / 16
 __global__ void
 fft_kernel_radix64_batch16(cuFloatComplex *d_data,
-                           const cuFloatComplex *__restrict__ W_64, unsigned int repeat) {
+                           const cuFloatComplex *__restrict__ W_64,
+                           unsigned int repeat) {
     // Tensor core shape
     constexpr int m = 16;
     constexpr int n = 8;
@@ -617,37 +644,42 @@ fft_kernel_radix64_batch16(cuFloatComplex *d_data,
     __syncwarp();
     // for (int i = 0; i < ept / 2; i++) {
     //     reg[i] = s_data[(laneid / 2) * (warp_size + 1) +
-    //                     reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
+    //                     reverse_2bit_groups<4>(i) + (ept / 2) * (laneid %
+    //                     2)];
     //     reg[i + ept / 2] =
     //         s_data[(ept / 2) * (warp_size + 1) +
-    //                (laneid / 2) * (warp_size + 1) + reverse_2bit_groups<4>(i) +
-    //                (ept / 2) * (laneid % 2)];
+    //                (laneid / 2) * (warp_size + 1) + reverse_2bit_groups<4>(i)
+    //                + (ept / 2) * (laneid % 2)];
     // }
 
-    for(unsigned int i=0; i<repeat; i++) {
+    for (unsigned int i = 0; i < repeat; i++) {
         for (int i = 0; i < ept / 2; i++) {
-            reg[i] = s_data[(laneid / 2) * (warp_size + 1) +
-                            reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
+            reg[i] =
+                s_data[(laneid / 2) * (warp_size + 1) +
+                       reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
             reg[i + ept / 2] =
                 s_data[(ept / 2) * (warp_size + 1) +
-                    (laneid / 2) * (warp_size + 1) + reverse_2bit_groups<4>(i) +
-                    (ept / 2) * (laneid % 2)];
+                       (laneid / 2) * (warp_size + 1) +
+                       reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
         }
 
         fft_kernel_r64_b16<64>(reg, W_64);
 
         for (int i = 0; i < ept / 2; i++) {
-            s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] = reg[i];
-            s_data[(ept / 2) * (warp_size + 1) + (warp_size + 1) * (laneid / 2) +
-                16 * (laneid % 2) + i] = reg[i + ept / 2];
+            s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
+                reg[i];
+            s_data[(ept / 2) * (warp_size + 1) +
+                   (warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
+                reg[i + ept / 2];
         }
         __syncwarp();
     }
 
     // write to smem
     // for (int i = 0; i < ept / 2; i++) {
-    //     s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] = reg[i];
-    //     s_data[(ept / 2) * (warp_size + 1) + (warp_size + 1) * (laneid / 2) +
+    //     s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
+    //     reg[i]; s_data[(ept / 2) * (warp_size + 1) + (warp_size + 1) *
+    //     (laneid / 2) +
     //            16 * (laneid % 2) + i] = reg[i + ept / 2];
     // }
     // __syncwarp();
@@ -718,8 +750,8 @@ fft_kernel_radix64_batch16(cuFloatComplex *d_data,
 
 //     // element-wise multiplication
 //     for (int i = 0; i < EPT_CONST / 2; i++) {
-//         int index1 = reverse_2bit_groups<4>(i) + lane_id * 16 + 1024 * warp_id;
-//         const cuFloatComplex w1 =
+//         int index1 = reverse_2bit_groups<4>(i) + lane_id * 16 + 1024 *
+//         warp_id; const cuFloatComplex w1 =
 //             W_4096[((index1 / 64) * (index1 % 64)) % 4096];
 //         int index2 = index1 + 8;
 //         const cuFloatComplex w2 =
@@ -727,8 +759,9 @@ fft_kernel_radix64_batch16(cuFloatComplex *d_data,
 //         reg[i] = make_cuFloatComplex(reg[i].x * w1.x - reg[i].y * w1.y,
 //                                     reg[i].x * w1.y + reg[i].y * w1.x);
 //         reg[i + EPT_CONST / 2] = make_cuFloatComplex(
-//             reg[i + EPT_CONST / 2].x * w2.x - reg[i + EPT_CONST / 2].y * w2.y,
-//             reg[i + EPT_CONST / 2].x * w2.y + reg[i + EPT_CONST / 2].y * w2.x);
+//             reg[i + EPT_CONST / 2].x * w2.x - reg[i + EPT_CONST / 2].y *
+//             w2.y, reg[i + EPT_CONST / 2].x * w2.y + reg[i + EPT_CONST / 2].y
+//             * w2.x);
 //     }
 
 //     // fft64_b16 iter 1 execute (4 warp executes each fft parallel)

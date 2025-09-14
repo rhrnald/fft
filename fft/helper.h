@@ -1,17 +1,19 @@
 #pragma once
 #include <iostream>
 
-#define CUDA_CHECK_AND_EXIT(error)                                                                      \
-        {                                                                                                   \
-            auto status = static_cast<cudaError_t>(error);                                                  \
-            if (status != cudaSuccess) {                                                                    \
-                std::cout << cudaGetErrorString(status) << " " << __FILE__ << ":" << __LINE__ << std::endl; \
-                std::exit(status);                                                                          \
-            }                                                                                               \
-        }
+#define CUDA_CHECK_AND_EXIT(error)                                             \
+    {                                                                          \
+        auto status = static_cast<cudaError_t>(error);                         \
+        if (status != cudaSuccess) {                                           \
+            std::cout << cudaGetErrorString(status) << " " << __FILE__ << ":"  \
+                      << __LINE__ << std::endl;                                \
+            std::exit(status);                                                 \
+        }                                                                      \
+    }
 
-template<typename Kernel>
-float measure_execution_ms(Kernel&& kernel, const unsigned int warm_up_runs, const unsigned int runs, cudaStream_t stream) {
+template <typename Kernel>
+float measure_execution_ms(Kernel &&kernel, const unsigned int warm_up_runs,
+                           const unsigned int runs, cudaStream_t stream) {
     cudaEvent_t startEvent, stopEvent;
     CUDA_CHECK_AND_EXIT(cudaEventCreate(&startEvent));
     CUDA_CHECK_AND_EXIT(cudaEventCreate(&stopEvent));
@@ -35,4 +37,3 @@ float measure_execution_ms(Kernel&& kernel, const unsigned int warm_up_runs, con
     CUDA_CHECK_AND_EXIT(cudaEventDestroy(stopEvent));
     return time;
 }
-

@@ -1,11 +1,11 @@
 #pragma once
 
 #include <cassert>
-#include <cuda_fp16.h>
 #include <cuComplex.h>
+#include <cuda_fp16.h>
 #include <cuda_runtime.h>
-#include <stdio.h>
 #include <iostream>
+#include <stdio.h>
 
 #include "utils.h"
 
@@ -31,18 +31,18 @@ template <int N> __device__ int reverse_2bit_groups(int x) {
 
 __global__ void
 fft_kernel_radix64_batch16(cuFloatComplex *d_data,
-                           const cuFloatComplex *__restrict__ W_64, unsigned int repeat);
-__global__ void
-fft_kernel_radix64_batch16_half(half2 *d_data,
-                           const half2 *__restrict__ W_64, unsigned int repeat);
+                           const cuFloatComplex *__restrict__ W_64,
+                           unsigned int repeat);
+__global__ void fft_kernel_radix64_batch16_half(half2 *d_data,
+                                                const half2 *__restrict__ W_64,
+                                                unsigned int repeat);
 __global__ void fft_kernel_radix4096_batch1(cuFloatComplex *d_data,
                                             const cuFloatComplex *W_4096);
 
-template <typename T, long long N>
-void my_fft(T *d_data) {
+template <typename T, long long N> void my_fft(T *d_data) {
     static constexpr unsigned int inside_repeats = 10000;
-    static constexpr unsigned int kernel_runs    = 1;
-    static constexpr unsigned int warm_up_runs   = 1;
+    static constexpr unsigned int kernel_runs = 1;
+    static constexpr unsigned int warm_up_runs = 1;
 
     cudaStream_t stream;
     CHECK_CUDA(cudaStreamCreate(&stream));
@@ -57,7 +57,7 @@ void my_fft(T *d_data) {
             // float -> half2 변환 (round-to-nearest-even)
             return __floats2half2_rn(re, im);
         } else {
-            static_assert(!std::is_same_v<T,T>, "Unsupported T");
+            static_assert(!std::is_same_v<T, T>, "Unsupported T");
         }
     };
 
@@ -74,41 +74,43 @@ void my_fft(T *d_data) {
     T *W_64, *W_4096;
     CHECK_CUDA(cudaMalloc(&W_64, 64 * sizeof(T)));
     CHECK_CUDA(cudaMalloc(&W_4096, 4096 * sizeof(T)));
-    CHECK_CUDA(cudaMemcpy(W_64, h_W_64, 64 * sizeof(T),
-                          cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(W_4096, h_W_4096, 4096 * sizeof(T),
-                          cudaMemcpyHostToDevice));
+    CHECK_CUDA(
+        cudaMemcpy(W_64, h_W_64, 64 * sizeof(T), cudaMemcpyHostToDevice));
+    CHECK_CUDA(
+        cudaMemcpy(W_4096, h_W_4096, 4096 * sizeof(T), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaDeviceSynchronize());
 
     double elapsed_time_repeat = measure_execution_ms(
         [&](cudaStream_t stream) {
             if constexpr (std::is_same_v<T, cuFloatComplex>) {
-                fft_kernel_radix64_batch16<<<N / 1024, 32, 0, stream>>>(d_data, W_64, inside_repeats);
-                // fft_kernel_radix4096_batch1<<<N / 4096, dim3(32, 4), 0, stream>>>(d_data, W_4096, inside_repeats);
+                fft_kernel_radix64_batch16<<<N / 1024, 32, 0, stream>>>(
+                    d_data, W_64, inside_repeats);
+                // fft_kernel_radix4096_batch1<<<N / 4096, dim3(32, 4), 0,
+                // stream>>>(d_data, W_4096, inside_repeats);
             } else if constexpr (std::is_same_v<T, half2>) {
-                fft_kernel_radix64_batch16_half<<<N / 1024, 32, 0, stream>>>(d_data, W_64, inside_repeats);
+                fft_kernel_radix64_batch16_half<<<N / 1024, 32, 0, stream>>>(
+                    d_data, W_64, inside_repeats);
                 assert("4096 half is not supported" && false);
             }
         },
-        warm_up_runs,
-        kernel_runs,
-        stream);
+        warm_up_runs, kernel_runs, stream);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 
     double elapsed_time_repeatx2 = measure_execution_ms(
         [&](cudaStream_t stream) {
             if constexpr (std::is_same_v<T, cuFloatComplex>) {
-                fft_kernel_radix64_batch16<<<N / 1024, 32, 0 , stream>>>(d_data, W_64, 2*inside_repeats);
-                // fft_kernel_radix4096_batch1<<<N / 4096, dim3(32, 4), 0, stream>>>(d_data, W_4096, 2*inside_repeats);
+                fft_kernel_radix64_batch16<<<N / 1024, 32, 0, stream>>>(
+                    d_data, W_64, 2 * inside_repeats);
+                // fft_kernel_radix4096_batch1<<<N / 4096, dim3(32, 4), 0,
+                // stream>>>(d_data, W_4096, 2*inside_repeats);
             } else if constexpr (std::is_same_v<T, half2>) {
-                fft_kernel_radix64_batch16_half<<<N / 1024, 32, 0, stream>>>(d_data, W_64, 2*inside_repeats);
+                fft_kernel_radix64_batch16_half<<<N / 1024, 32, 0, stream>>>(
+                    d_data, W_64, 2 * inside_repeats);
                 assert("4096 half is not supported" && false);
             }
         },
-        warm_up_runs,
-        kernel_runs,
-        stream);
+        warm_up_runs, kernel_runs, stream);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
     cudaEvent_t start, stop;
@@ -124,5 +126,6 @@ void my_fft(T *d_data) {
     // CHECK_CUDA(cudaEventDestroy(stop));
     std::cout << "elapsed_time_repeat: " << elapsed_time_repeat << std::endl;
 
-    printf("computation time: %.8f ms\n", (elapsed_time_repeatx2-elapsed_time_repeat)/inside_repeats);
+    printf("computation time: %.8f ms\n",
+           (elapsed_time_repeatx2 - elapsed_time_repeat) / inside_repeats);
 }
