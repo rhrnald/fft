@@ -5,6 +5,7 @@
 #include "utils.h"
 
 #include "fft_tc_sm_bench.h"
+#include "my_fft.h"
 
 void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch);
 
@@ -25,7 +26,11 @@ int main() {
 
     baseline_fft(h_input, h_output, N, batch);
 
-    // my_fft<float2, N>(d_custom_half);
+    float2 *d_input;
+    CHECK_CUDA(cudaMalloc(&d_input, sizeof(float2) * N * batch));
+    CHECK_CUDA(cudaMemcpy(d_input, h_input, sizeof(float2) * N * batch, cudaMemcpyHostToDevice));
+
+    my_fft<float2, N*batch>(d_input, h_output);
 
     fft_tc_sm_benchmark<N>(h_input, h_input_half, h_output, batch);
 

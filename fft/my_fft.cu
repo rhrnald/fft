@@ -174,18 +174,55 @@ __device__ void permute_radix4_local(T &a, T &b, T &c, T &d, int pattern) {
     d = tmp[(pattern - 3) & 3];
 }
 template <typename T>
+__device__ __forceinline__
+typename std::enable_if<sizeof(T) == 4, void>::type
+permute_predicated(T &a, T &b, T &c, T &d, int pattern)
+{
+    uint32_t A = reinterpret_cast<uint32_t*>(&a)[0];
+    uint32_t B = reinterpret_cast<uint32_t*>(&b)[0];
+    uint32_t C = reinterpret_cast<uint32_t*>(&c)[0];
+    uint32_t D = reinterpret_cast<uint32_t*>(&d)[0];
+
+    asm volatile (
+        "{\n\t"
+        ".reg .pred p0, p1, p2, p3, p_bd, p_ac, p_abcd;\n\t"
+        // p0=pattern==0, p1=pattern==1, p2=pattern==2, p3=pattern==3
+        "setp.eq.s32 p0, %4, 0;\n\t"
+        "setp.eq.s32 p1, %4, 1;\n\t"
+        "setp.eq.s32 p2, %4, 2;\n\t"
+        "setp.eq.s32 p3, %4, 3;\n\t"
+        // 필요한 조합:
+        // (b<->d) when pattern==0 || pattern==3
+        "or.pred p_bd, p0, p3;\n\t"
+        // (a<->c) when pattern==1 || pattern==3
+        "or.pred p_ac, p1, p3;\n\t"
+        // (a<->b & c<->d) when pattern==2 || pattern==3
+        "or.pred p_abcd, p2, p3;\n\t"
+
+        // b <-> d
+        "@p_bd { .reg .b32 t; mov.b32 t, %1; mov.b32 %1, %3; mov.b32 %3, t; }\n\t"
+        // a <-> c
+        "@p_ac { .reg .b32 t; mov.b32 t, %0; mov.b32 %0, %2; mov.b32 %2, t; }\n\t"
+        // a <-> b,  c <-> d
+        "@p_abcd {\n\t"
+        "  .reg .b32 t;\n\t"
+        "  mov.b32 t, %0; mov.b32 %0, %1; mov.b32 %1, t;\n\t"
+        "  mov.b32 t, %2; mov.b32 %2, %3; mov.b32 %3, t;\n\t"
+        "}\n\t"
+        "}\n\t"
+        : "+r"(A), "+r"(B), "+r"(C), "+r"(D)     // %0 %1 %2 %3  (read/write)
+        : "r"(pattern)                            // %4          (read-only)
+        // no clobbers (모든 임시는 로컬 레지스터 선언으로 처리)
+    );
+
+    a = reinterpret_cast<T*>(&A)[0];
+    b = reinterpret_cast<T*>(&B)[0];
+    c = reinterpret_cast<T*>(&C)[0];
+    d = reinterpret_cast<T*>(&D)[0];
+}
+template <typename T>
 __device__ void permute_radix4_branch(T &a, T &b, T &c, T &d, int pattern) {
-    if (pattern == 0 || pattern == 3) {
-        T tmp = b;
-        b = d;
-        d = tmp;
-    }
     if (pattern == 1 || pattern == 3) {
-        T tmp = a;
-        a = c;
-        c = tmp;
-    }
-    if (pattern == 2 || pattern == 3) {
         T tmp = a;
         a = b;
         b = tmp;
@@ -193,6 +230,16 @@ __device__ void permute_radix4_branch(T &a, T &b, T &c, T &d, int pattern) {
         tmp = c;
         c = d;
         d = tmp;
+    }
+    if (pattern == 0 || pattern == 3) {
+        T tmp = b;
+        b = d;
+        d = tmp;
+    }
+    if (pattern == 2 || pattern == 3) {
+        T tmp = a;
+        a = c;
+        c = tmp;
     }
 }
 template <typename T>
@@ -251,17 +298,7 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     //     d = t0;
     //     break;
     // }
-    if (pattern == 0 || pattern == 3) {
-        T tmp = b;
-        b = d;
-        d = tmp;
-    }
     if (pattern == 1 || pattern == 3) {
-        T tmp = a;
-        a = c;
-        c = tmp;
-    }
-    if (pattern == 2 || pattern == 3) {
         T tmp = a;
         a = b;
         b = tmp;
@@ -269,6 +306,16 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
         tmp = c;
         c = d;
         d = tmp;
+    }
+    if (pattern == 0 || pattern == 3) {
+        T tmp = b;
+        b = d;
+        d = tmp;
+    }
+    if (pattern == 2 || pattern == 3) {
+        T tmp = a;
+        a = c;
+        c = tmp;
     }
 
     // version 1
@@ -355,6 +402,74 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     // tmp2[0]*(pattern==3);
 }
 
+__device__ __forceinline__ unsigned long long pack64(const float2 &x) {
+    unsigned long long u;
+    memcpy(&u, &x, sizeof(u));
+    return u;
+}
+__device__ __forceinline__ float2 unpack64(unsigned long long u) {
+    float2 x;
+    memcpy(&x, &u, sizeof(u));
+    return x;
+}
+template <typename T>
+__device__ __forceinline__ void permute_radix4_guarded(T &a, T &b, T &c, T &d, int pattern)
+{
+    static_assert(sizeof(T) == 8, "T must be 8 bytes (float2/cuFloatComplex)");
+
+    // pack to 64-bit scalars for inline PTX operands
+    unsigned long long A, B, C, D;
+    memcpy(&A, &a, 8);
+    memcpy(&B, &b, 8);
+    memcpy(&C, &c, 8);
+    memcpy(&D, &d, 8);
+
+    asm volatile(
+        "{\n\t"
+        ".reg .pred p0, p1, p2, p3, p_abcd, p_bd, p_ac;\n\t"
+        ".reg .b32  pat;\n\t"
+        ".reg .b64  t;\n\t"
+
+        "mov.b32 pat, %4;              \n\t"
+        // eq predicates for 0/1/2/3
+        "setp.eq.s32 p0, pat, 0;       \n\t"
+        "setp.eq.s32 p1, pat, 1;       \n\t"
+        "setp.eq.s32 p2, pat, 2;       \n\t"
+        "setp.eq.s32 p3, pat, 3;       \n\t"
+
+        // OR-combined predicates matching your C++ 'if (…||…)'
+        "or.pred p_abcd, p1, p3;       \n\t" // (pattern==1 || pattern==3)
+        "or.pred p_bd,   p0, p3;       \n\t" // (pattern==0 || pattern==3)
+        "or.pred p_ac,   p2, p3;       \n\t" // (pattern==2 || pattern==3)
+
+        // ---- Block 1: if (pattern==1 || pattern==3) { swap A<->B; swap C<->D; }
+        "@p_abcd mov.b64 t,  %0;       \n\t"
+        "@p_abcd mov.b64 %0, %1;       \n\t"
+        "@p_abcd mov.b64 %1, t;        \n\t"
+        "@p_abcd mov.b64 t,  %2;       \n\t"
+        "@p_abcd mov.b64 %2, %3;       \n\t"
+        "@p_abcd mov.b64 %3, t;        \n\t"
+
+        // ---- Block 2: if (pattern==0 || pattern==3) { swap B<->D; }
+        "@p_bd   mov.b64 t,  %1;       \n\t"
+        "@p_bd   mov.b64 %1, %3;       \n\t"
+        "@p_bd   mov.b64 %3, t;        \n\t"
+
+        // ---- Block 3: if (pattern==2 || pattern==3) { swap A<->C; }
+        "@p_ac   mov.b64 t,  %0;       \n\t"
+        "@p_ac   mov.b64 %0, %2;       \n\t"
+        "@p_ac   mov.b64 %2, t;        \n\t"
+        "}\n\t"
+        : "+l"(A), "+l"(B), "+l"(C), "+l"(D)  // 64-bit scalar regs bound to .b64
+        : "r"(pattern)                        // 32-bit scalar
+    );
+
+    memcpy(&a, &A, 8);
+    memcpy(&b, &B, 8);
+    memcpy(&c, &C, 8);
+    memcpy(&d, &D, 8);
+}
+
 // in-place device kernel
 template <int N>
 __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
@@ -411,68 +526,68 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
             reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].y = reg_frag_d[3];
         }
 
-        if (i == 0) {
-            for (int jk = 0; jk < 8; jk++) {
-                int j = (jk / stride) * (4 * stride);
-                int k = jk % stride;
-                // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
-                // t0 t1 t2 t3
-                // 0  1  2  3       0  4  8  12
-                // 7  4  5  6       13 1  5  9
-                // 10 11 8  9	->  10 14 2  6
-                // 13 14 15 12		7  11 15 3
-                permute_radix4_local(reg[k + j], reg[k + j + stride],
-                                     reg[k + j + stride * 2],
-                                     reg[k + j + stride * 3], laneid & 3);
-            }
-        }
-        if (i == 1) {
-            for (int jk = 0; jk < 8; jk++) {
-                int j = (jk / stride) * (4 * stride);
-                int k = jk % stride;
-                // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
-                // t0 t1 t2 t3
-                // 0  1  2  3       0  4  8  12
-                // 7  4  5  6       13 1  5  9
-                // 10 11 8  9	->  10 14 2  6
-                // 13 14 15 12		7  11 15 3
-                permute_radix4_branch(reg[k + j], reg[k + j + stride],
-                                      reg[k + j + stride * 2],
-                                      reg[k + j + stride * 3], laneid & 3);
-            }
-        }
-        /*if (i < ITER_DEVICE_CONST - 1) {
-            // #pragma unroll
-            // for (int j = 0; j < 32; j += 4 * stride) {
-            //     #pragma unroll
-            //     for (int k = 0; k < stride; k++) {
-            //         // int
-        perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
-            //         // t0 t1 t2 t3
-            //         // 0  1  2  3       0  4  8  12
-            //         // 7  4  5  6       13 1  5  9
-            //         // 10 11 8  9	->  10 14 2  6
-            //         // 13 14 15 12		7  11 15 3
-            //         permute_radix4(reg[k + j], reg[k + j + stride],
-            //                        reg[k + j + stride * 2],
-            //                        reg[k + j + stride * 3], laneid & 3);
-            //     }
-            // }
-
-            for (int jk = 0; jk < 8; jk ++) {
-                int j= (jk / stride) * (4*stride);
-                int k = jk % stride;
-                // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
-                // t0 t1 t2 t3
-                // 0  1  2  3       0  4  8  12
-                // 7  4  5  6       13 1  5  9
-                // 10 11 8  9	->  10 14 2  6
-                // 13 14 15 12		7  11 15 3
-                permute_radix4(reg[k + j], reg[k + j + stride],
-                                reg[k + j + stride * 2],
-                                reg[k + j + stride * 3], laneid & 3);
-            }
-        }*/
+        // if (i == 0) {
+        //     for (int jk = 0; jk < 8; jk++) {
+        //         int j = (jk / stride) * (4 * stride);
+        //         int k = jk % stride;
+        //         // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
+        //         // t0 t1 t2 t3
+        //         // 0  1  2  3       0  4  8  12
+        //         // 7  4  5  6       13 1  5  9
+        //         // 10 11 8  9	->  10 14 2  6
+        //         // 13 14 15 12		7  11 15 3
+        //         permute_radix4_branch(reg[k + j], reg[k + j + stride],
+        //                              reg[k + j + stride * 2],
+        //                              reg[k + j + stride * 3], laneid & 3);
+        //     }
+        // }
+        // if (i == 1) {
+        //     for (int jk = 0; jk < 8; jk++) {
+        //         int j = (jk / stride) * (4 * stride);
+        //         int k = jk % stride;
+        //         // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
+        //         // t0 t1 t2 t3
+        //         // 0  1  2  3       0  4  8  12
+        //         // 7  4  5  6       13 1  5  9
+        //         // 10 11 8  9	->  10 14 2  6
+        //         // 13 14 15 12		7  11 15 3
+        //         permute_radix4_local(reg[k + j], reg[k + j + stride],
+        //                               reg[k + j + stride * 2],
+        //                               reg[k + j + stride * 3], laneid & 3);
+        //     }
+        // }
+        // if (i < ITER_DEVICE_CONST - 1) {
+        //     // #pragma unroll
+        //     // for (int j = 0; j < 32; j += 4 * stride) {
+        //     //     #pragma unroll
+        //     //     for (int k = 0; k < stride; k++) {
+        //     //         // int
+        // // perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
+        //     //         // t0 t1 t2 t3
+        //     //         // 0  1  2  3       0  4  8  12
+        //     //         // 7  4  5  6       13 1  5  9
+        //     //         // 10 11 8  9	->  10 14 2  6
+        //     //         // 13 14 15 12		7  11 15 3
+        //     //         permute_radix4(reg[k + j], reg[k + j + stride],
+        //     //                        reg[k + j + stride * 2],
+        //     //                        reg[k + j + stride * 3], laneid & 3);
+        //     //     }
+        //     // }
+        //     #pragma unroll
+        //     for (int jk = 0; jk < 8; jk ++) {
+        //         int j= (jk / stride) * (4*stride);
+        //         int k = jk % stride;
+        //         // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
+        //         // t0 t1 t2 t3
+        //         // 0  1  2  3       0  4  8  12
+        //         // 7  4  5  6       13 1  5  9
+        //         // 10 11 8  9	->  10 14 2  6
+        //         // 13 14 15 12		7  11 15 3
+        //         permute_radix4_branch(reg[k + j], reg[k + j + stride],
+        //                         reg[k + j + stride * 2],
+        //                         reg[k + j + stride * 3], laneid & 3);
+        //     }
+        // }
     }
 }
 
@@ -631,63 +746,44 @@ fft_kernel_radix64_batch16(cuFloatComplex *d_data,
     // Registers for data
     cuFloatComplex reg[ept];
 
-    __shared__ cuFloatComplex s_data[ept * (warp_size + 1)];
+    extern __shared__ __align__(sizeof(cuFloatComplex)) cuFloatComplex s_data[];
 
     int laneid = threadIdx.x;
     int block_id = blockIdx.x;
 
     for (int i = 0; i < ept; i++) {
-        s_data[i * (warp_size + 1) + laneid] =
+        s_data[i * (warp_size + 2) + laneid/(warp_size/2) * (warp_size/2 + 1) + laneid%(warp_size/2)] =
             d_data[block_id * N * batch + i * warp_size + laneid];
     }
 
     __syncwarp();
-    // for (int i = 0; i < ept / 2; i++) {
-    //     reg[i] = s_data[(laneid / 2) * (warp_size + 1) +
-    //                     reverse_2bit_groups<4>(i) + (ept / 2) * (laneid %
-    //                     2)];
-    //     reg[i + ept / 2] =
-    //         s_data[(ept / 2) * (warp_size + 1) +
-    //                (laneid / 2) * (warp_size + 1) + reverse_2bit_groups<4>(i)
-    //                + (ept / 2) * (laneid % 2)];
-    // }
+
+    for (int i = 0; i < ept / 2; i++) {
+        reg[i] = s_data[laneid * (warp_size/2 + 1) +
+                        reverse_2bit_groups<4>(i)];
+        reg[i + ept / 2] =
+            s_data[ept * (warp_size/2 + 1) +
+                laneid * (warp_size/2 + 1) + reverse_2bit_groups<4>(i)];
+    }
 
     for (unsigned int i = 0; i < repeat; i++) {
-        for (int i = 0; i < ept / 2; i++) {
-            reg[i] =
-                s_data[(laneid / 2) * (warp_size + 1) +
-                       reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
-            reg[i + ept / 2] =
-                s_data[(ept / 2) * (warp_size + 1) +
-                       (laneid / 2) * (warp_size + 1) +
-                       reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
-        }
 
         fft_kernel_r64_b16<64>(reg, W_64);
 
-        for (int i = 0; i < ept / 2; i++) {
-            s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
-                reg[i];
-            s_data[(ept / 2) * (warp_size + 1) +
-                   (warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
-                reg[i + ept / 2];
-        }
-        __syncwarp();
     }
 
     // write to smem
-    // for (int i = 0; i < ept / 2; i++) {
-    //     s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
-    //     reg[i]; s_data[(ept / 2) * (warp_size + 1) + (warp_size + 1) *
-    //     (laneid / 2) +
-    //            16 * (laneid % 2) + i] = reg[i + ept / 2];
-    // }
-    // __syncwarp();
+    for (int i = 0; i < ept / 2; i++) {
+        s_data[(warp_size/2 + 1) * laneid + i] = reg[i];
+        s_data[ept* (warp_size/2 + 1) + laneid * (warp_size/2 + 1) + i] = reg[i + ept / 2];
+    }
+
+    __syncwarp();
 
     // write to gmem
     for (int i = 0; i < ept; i++)
         d_data[block_id * N * batch + laneid + i * warp_size] =
-            s_data[i * (warp_size + 1) + laneid];
+            s_data[i * (warp_size + 2) + laneid/(warp_size/2) * (warp_size/2 + 1) + laneid%(warp_size/2)];
 }
 
 // blockDim = {32,4}
