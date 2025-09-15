@@ -30,7 +30,7 @@ int main() {
     CHECK_CUDA(cudaMalloc(&d_input, sizeof(float2) * N * batch));
     CHECK_CUDA(cudaMemcpy(d_input, h_input, sizeof(float2) * N * batch, cudaMemcpyHostToDevice));
 
-    my_fft<float2, N*batch>(d_input, h_output);
+    my_fft_benchmark<N>(h_input, h_input_half, h_output, batch);
 
     fft_tc_sm_benchmark<N>(h_input, h_input_half, h_output, batch);
 

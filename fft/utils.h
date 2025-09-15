@@ -15,6 +15,12 @@
         }                                                                      \
     } while (0)
 
+struct PerfStat {
+    double comp_ms;
+    double e2e_ms;
+    double comm_ms;
+};
+
 template <typename T> constexpr const char *type_cstr() {
     using U = std::remove_cv_t<T>;
     if constexpr (std::is_same_v<U, float>)

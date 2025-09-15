@@ -402,86 +402,35 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     // tmp2[0]*(pattern==3);
 }
 
-__device__ __forceinline__ unsigned long long pack64(const float2 &x) {
-    unsigned long long u;
-    memcpy(&u, &x, sizeof(u));
-    return u;
-}
-__device__ __forceinline__ float2 unpack64(unsigned long long u) {
-    float2 x;
-    memcpy(&x, &u, sizeof(u));
-    return x;
+template <typename T>
+__device__ __forceinline__ void swap_inline(T &x, T &y) {
+    T tmp = x;
+    x = y;
+    y = tmp;
 }
 template <typename T>
-__device__ __forceinline__ void permute_radix4_guarded(T &a, T &b, T &c, T &d, int pattern)
-{
-    static_assert(sizeof(T) == 8, "T must be 8 bytes (float2/cuFloatComplex)");
-
-    // pack to 64-bit scalars for inline PTX operands
-    unsigned long long A, B, C, D;
-    memcpy(&A, &a, 8);
-    memcpy(&B, &b, 8);
-    memcpy(&C, &c, 8);
-    memcpy(&D, &d, 8);
-
-    asm volatile(
-        "{\n\t"
-        ".reg .pred p0, p1, p2, p3, p_abcd, p_bd, p_ac;\n\t"
-        ".reg .b32  pat;\n\t"
-        ".reg .b64  t;\n\t"
-
-        "mov.b32 pat, %4;              \n\t"
-        // eq predicates for 0/1/2/3
-        "setp.eq.s32 p0, pat, 0;       \n\t"
-        "setp.eq.s32 p1, pat, 1;       \n\t"
-        "setp.eq.s32 p2, pat, 2;       \n\t"
-        "setp.eq.s32 p3, pat, 3;       \n\t"
-
-        // OR-combined predicates matching your C++ 'if (…||…)'
-        "or.pred p_abcd, p1, p3;       \n\t" // (pattern==1 || pattern==3)
-        "or.pred p_bd,   p0, p3;       \n\t" // (pattern==0 || pattern==3)
-        "or.pred p_ac,   p2, p3;       \n\t" // (pattern==2 || pattern==3)
-
-        // ---- Block 1: if (pattern==1 || pattern==3) { swap A<->B; swap C<->D; }
-        "@p_abcd mov.b64 t,  %0;       \n\t"
-        "@p_abcd mov.b64 %0, %1;       \n\t"
-        "@p_abcd mov.b64 %1, t;        \n\t"
-        "@p_abcd mov.b64 t,  %2;       \n\t"
-        "@p_abcd mov.b64 %2, %3;       \n\t"
-        "@p_abcd mov.b64 %3, t;        \n\t"
-
-        // ---- Block 2: if (pattern==0 || pattern==3) { swap B<->D; }
-        "@p_bd   mov.b64 t,  %1;       \n\t"
-        "@p_bd   mov.b64 %1, %3;       \n\t"
-        "@p_bd   mov.b64 %3, t;        \n\t"
-
-        // ---- Block 3: if (pattern==2 || pattern==3) { swap A<->C; }
-        "@p_ac   mov.b64 t,  %0;       \n\t"
-        "@p_ac   mov.b64 %0, %2;       \n\t"
-        "@p_ac   mov.b64 %2, t;        \n\t"
-        "}\n\t"
-        : "+l"(A), "+l"(B), "+l"(C), "+l"(D)  // 64-bit scalar regs bound to .b64
-        : "r"(pattern)                        // 32-bit scalar
-    );
-
-    memcpy(&a, &A, 8);
-    memcpy(&b, &B, 8);
-    memcpy(&c, &C, 8);
-    memcpy(&d, &D, 8);
+__device__ void permute_radix4_tmp(T &a, T &b, T &c, T &d, T &e, T &f, T &g, T &h, int pattern) {
+    if (pattern == 1 || pattern == 3) {
+        swap_inline(a,e);
+        swap_inline(b,f);
+        swap_inline(c,g);
+        swap_inline(d,h);
+    }
+    swap_inline(b,c);
+    swap_inline(f,g);
 }
 
 // in-place device kernel
 template <int N>
-__device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
+__device__ void fft_kernel_r64_b16(cuFloatComplex *_reg,
                                    const cuFloatComplex *W_4096) {
     float reg_frag_zero[TC_M_DEVICE_CONST * TC_N_DEVICE_CONST /
                         WARP_SIZE_DEVICE_CONST];
-
+    float *reg = reinterpret_cast<float*>(_reg);
     for (int i = 0;
          i < TC_M_DEVICE_CONST * TC_N_DEVICE_CONST / WARP_SIZE_DEVICE_CONST;
          i++)
         reg_frag_zero[i] = 0.0f;
-
     int laneid = threadIdx.x;
 #pragma unroll
     for (int i = 0; i < ITER_DEVICE_CONST; i++) {
@@ -494,12 +443,10 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
                              WARP_SIZE_DEVICE_CONST];
             float reg_frag_d[TC_M_DEVICE_CONST * TC_N_DEVICE_CONST /
                              WARP_SIZE_DEVICE_CONST];
-
-            reg_frag_a[0] = reg[j].x;
-            reg_frag_a[1] = reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].x;
-            reg_frag_a[2] = reg[j].y;
-            reg_frag_a[3] = reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].y;
-
+            reg_frag_a[0] = reg[j*2];
+            reg_frag_a[1] = reg[j*2 + N_DEVICE_CONST / RADIX_DEVICE_CONST];
+            reg_frag_a[2] = reg[j*2+1];
+            reg_frag_a[3] = reg[j*2+1 + N_DEVICE_CONST / RADIX_DEVICE_CONST];
             // w = w_4stride
             // b = [ w^ i ( k + Nj) ] ^ T
             int j_perm;
@@ -507,87 +454,68 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
                 j_perm = (j / (stride / 4)) % RADIX_DEVICE_CONST;
             else
                 j_perm = 0;
-
             int i_perm = (j / stride) % RADIX_DEVICE_CONST;
             int k = j % stride;
-
-            // fill_reg_b<N>(reg_frag_b, i * 2, stride, i_perm, j_perm, k,
-            //                     W_4096);
+            fill_reg_b<N>(reg_frag_b, i * 2, stride, i_perm, j_perm, k,
+                                W_4096);
             // fill_reg_b<N>(reg_frag_b, stride, i_perm, j_perm, k, W_4096);
             // printf("%d %d %d %d %d : %f %f\n", threadIdx.x, stride, i_perm,
             // j_perm, k, reg_frag_b[0], reg_frag_b[1]);
-
             mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b,
                                         reg_frag_zero);
-
-            reg[j].x = reg_frag_d[0];
-            reg[j].y = reg_frag_d[1];
-            reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].x = reg_frag_d[2];
-            reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].y = reg_frag_d[3];
+            reg[j*2] = reg_frag_d[0];
+            reg[j*2+1] = reg_frag_d[1];
+            reg[j*2 + N_DEVICE_CONST / RADIX_DEVICE_CONST] = reg_frag_d[2];
+            reg[j*2+1 + N_DEVICE_CONST / RADIX_DEVICE_CONST] = reg_frag_d[3];
         }
-
-        // if (i == 0) {
-        //     for (int jk = 0; jk < 8; jk++) {
-        //         int j = (jk / stride) * (4 * stride);
-        //         int k = jk % stride;
-        //         // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
-        //         // t0 t1 t2 t3
-        //         // 0  1  2  3       0  4  8  12
-        //         // 7  4  5  6       13 1  5  9
-        //         // 10 11 8  9	->  10 14 2  6
-        //         // 13 14 15 12		7  11 15 3
-        //         permute_radix4_branch(reg[k + j], reg[k + j + stride],
-        //                              reg[k + j + stride * 2],
-        //                              reg[k + j + stride * 3], laneid & 3);
-        //     }
-        // }
-        // if (i == 1) {
-        //     for (int jk = 0; jk < 8; jk++) {
-        //         int j = (jk / stride) * (4 * stride);
-        //         int k = jk % stride;
-        //         // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
-        //         // t0 t1 t2 t3
-        //         // 0  1  2  3       0  4  8  12
-        //         // 7  4  5  6       13 1  5  9
-        //         // 10 11 8  9	->  10 14 2  6
-        //         // 13 14 15 12		7  11 15 3
-        //         permute_radix4_local(reg[k + j], reg[k + j + stride],
-        //                               reg[k + j + stride * 2],
-        //                               reg[k + j + stride * 3], laneid & 3);
-        //     }
-        // }
         // if (i < ITER_DEVICE_CONST - 1) {
-        //     // #pragma unroll
-        //     // for (int j = 0; j < 32; j += 4 * stride) {
-        //     //     #pragma unroll
-        //     //     for (int k = 0; k < stride; k++) {
-        //     //         // int
-        // // perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
-        //     //         // t0 t1 t2 t3
-        //     //         // 0  1  2  3       0  4  8  12
-        //     //         // 7  4  5  6       13 1  5  9
-        //     //         // 10 11 8  9	->  10 14 2  6
-        //     //         // 13 14 15 12		7  11 15 3
-        //     //         permute_radix4(reg[k + j], reg[k + j + stride],
-        //     //                        reg[k + j + stride * 2],
-        //     //                        reg[k + j + stride * 3], laneid & 3);
-        //     //     }
-        //     // }
-        //     #pragma unroll
-        //     for (int jk = 0; jk < 8; jk ++) {
-        //         int j= (jk / stride) * (4*stride);
+        //     for (int jk = 0; jk < 8; jk++) {
+        //         int j = (jk / stride) * (4 * stride);
         //         int k = jk % stride;
         //         // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
         //         // t0 t1 t2 t3
         //         // 0  1  2  3       0  4  8  12
         //         // 7  4  5  6       13 1  5  9
-        //         // 10 11 8  9	->  10 14 2  6
-        //         // 13 14 15 12		7  11 15 3
-        //         permute_radix4_branch(reg[k + j], reg[k + j + stride],
-        //                         reg[k + j + stride * 2],
-        //                         reg[k + j + stride * 3], laneid & 3);
+        //         // 10 11 8  9   ->  10 14 2  6
+        //         // 13 14 15 12      7  11 15 3
+        //         permute_radix4_tmp(reg[2*(k + j)], reg[2*(k+j)+1],
+        //                              reg[2*(k + j + stride)], reg[2*(k + j + stride)+1],
+        //                              reg[2*(k + j + stride * 2)], reg[2*(k + j + stride*2)+1],
+        //                              reg[2*(k + j + stride * 3)],reg[2*(k + j + stride*3)+1],
+        //                                 laneid & 3);
         //     }
         // }
+        /*if (i < ITER_DEVICE_CONST - 1) {
+            // #pragma unroll
+            // for (int j = 0; j < 32; j += 4 * stride) {
+            //     #pragma unroll
+            //     for (int k = 0; k < stride; k++) {
+            //         // int
+        perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
+            //         // t0 t1 t2 t3
+            //         // 0  1  2  3       0  4  8  12
+            //         // 7  4  5  6       13 1  5  9
+            //         // 10 11 8  9    ->  10 14 2  6
+            //         // 13 14 15 12       7  11 15 3
+            //         permute_radix4(reg[k + j], reg[k + j + stride],
+            //                        reg[k + j + stride * 2],
+            //                        reg[k + j + stride * 3], laneid & 3);
+            //     }
+            // }
+            for (int jk = 0; jk < 8; jk ++) {
+                int j= (jk / stride) * (4*stride);
+                int k = jk % stride;
+                // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
+                // t0 t1 t2 t3
+                // 0  1  2  3       0  4  8  12
+                // 7  4  5  6       13 1  5  9
+                // 10 11 8  9   ->  10 14 2  6
+                // 13 14 15 12      7  11 15 3
+                permute_radix4(reg[k + j], reg[k + j + stride],
+                                reg[k + j + stride * 2],
+                                reg[k + j + stride * 3], laneid & 3);
+            }
+        }*/
     }
 }
 
@@ -746,7 +674,7 @@ fft_kernel_radix64_batch16(cuFloatComplex *d_data,
     // Registers for data
     cuFloatComplex reg[ept];
 
-    extern __shared__ __align__(sizeof(cuFloatComplex)) cuFloatComplex s_data[];
+    extern __shared__ __align__(sizeof(float4)) cuFloatComplex s_data[];
 
     int laneid = threadIdx.x;
     int block_id = blockIdx.x;
@@ -766,10 +694,22 @@ fft_kernel_radix64_batch16(cuFloatComplex *d_data,
                 laneid * (warp_size/2 + 1) + reverse_2bit_groups<4>(i)];
     }
 
+    #pragma unroll 1
     for (unsigned int i = 0; i < repeat; i++) {
-
+        // for (int i = 0; i < ept / 2; i++) {
+        //     reg[i] = s_data[laneid * (warp_size/2 + 1) +
+        //                     reverse_2bit_groups<4>(i)];
+        //     reg[i + ept / 2] =
+        //         s_data[ept * (warp_size/2 + 1) +
+        //             laneid * (warp_size/2 + 1) + reverse_2bit_groups<4>(i)];
+        // }
+        // __syncwarp();
         fft_kernel_r64_b16<64>(reg, W_64);
-
+        // write to smem
+        // for (int i = 0; i < ept / 2; i++) {
+        //     s_data[(warp_size/2 + 1) * laneid + i] = reg[i];
+        //     s_data[ept* (warp_size/2 + 1) + laneid * (warp_size/2 + 1) + i] = reg[i + ept / 2];
+        // }
     }
 
     // write to smem

@@ -12,33 +12,10 @@
 
 #include "fft_tc_sm.h"
 
-namespace {
-
-// 내부용 타입 문자열 (half/float/double)
-template <typename T>
-__host__ __device__ constexpr const char *bench_type_cstr() {
-    if constexpr (std::is_same_v<T, half>)
-        return "half";
-    if constexpr (std::is_same_v<T, float>)
-        return "float";
-    if constexpr (std::is_same_v<T, double>)
-        return "double";
-    else
-        return "unknown";
-}
-
-struct PerfStat {
-    double comp_ms;
-    double e2e_ms;
-    double comm_ms;
-};
-
-} // namespace
-
 template <typename T, unsigned int N, unsigned int radix>
 static inline PerfStat fft_tc_sm_perf(vec2_t<T> *d_data, unsigned int B) {
     static constexpr unsigned int inside_repeats = 1000;
-    static constexpr unsigned int kernel_runs = 10;
+    static constexpr unsigned int kernel_runs = 1;
     static constexpr unsigned int warm_up_runs = 1;
     static constexpr unsigned int warp_per_block = 1;
 
@@ -126,51 +103,29 @@ static inline void fft_tc_sm_val(vec2_t<T> *d_data, unsigned int B) {
     CHECK_CUDA(cudaStreamDestroy(stream));
 }
 
-template <typename T, unsigned int N, unsigned int radix>
-void fft_tc_sm_run(vec2_t<T> *h_data, float2 *baseline, unsigned int B) {
-    using T2 = vec2_t<T>;
-
-    // H2D
-    T2 *d_custom = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_custom, sizeof(T2) * N * B));
-    CHECK_CUDA(cudaMemcpy(d_custom, h_data, sizeof(T2) * N * B,
-                          cudaMemcpyHostToDevice));
-
-    // 검증용 실행
-    fft_tc_sm_val<T, N, radix>(d_custom, B);
-
-    // 첫 배치 N개만 D2H해서 오차 계산
-    T2 *h_custom = static_cast<T2 *>(std::malloc(sizeof(T2) * N));
-    CHECK_CUDA(
-        cudaMemcpy(h_custom, d_custom, sizeof(T2) * N, cudaMemcpyDeviceToHost));
-
-    const double max_err =
-        static_cast<double>(check_max_abs_err(baseline, h_custom, N));
-
-    // 성능 측정
-    const auto perf = fft_tc_sm_perf<T, N, radix>(d_custom, B);
-
-    // 결과 누적 (출력은 메인에서)
-    stat::push(stat::RunStat{/*type*/ bench_type_cstr<T>(),
-                             /*N*/ N,
-                             /*radix*/ radix,
-                             /*B*/ B,
-                             /*max_err*/ max_err,
-                             /*comp_ms*/ perf.comp_ms,
-                             /*comm_ms*/ perf.comm_ms,
-                             /*e2e_ms*/ perf.e2e_ms});
-
-    // 정리
-    CHECK_CUDA(cudaFree(d_custom));
-    std::free(h_custom);
-}
-
 template <unsigned int N>
 void fft_tc_sm_benchmark(float2 *h_input, half2 *h_input_half, float2 *baseline,
                          int batch) {
-    fft_tc_sm_run<half, N, 8>(h_input_half, baseline, batch);
+    benchmark_run<half, N, 8>(
+        [&](half2* d_custom, int B) {
+            fft_tc_sm_val<half, N, 8>(d_custom, B);
+        }, 
+        [&](half2* d_custom, int B) {
+            return fft_tc_sm_perf<half, N, 8>(d_custom, B);
+        },
+        h_input_half, baseline, batch);
+
+    benchmark_run<float, N, 8>(
+        [&](float2* d_custom, int B) {
+            fft_tc_sm_val<float, N, 8>(d_custom, B);
+        }, 
+        [&](float2* d_custom, int B) {
+            return fft_tc_sm_perf<float, N, 8>(d_custom, B);
+        },
+        h_input, baseline, batch);
+    // fft_tc_sm_run<half, N, 8>(h_input_half, baseline, batch);
     // fft_tc_sm_run<half, N, 16>(h_input_half, baseline, batch);
-    fft_tc_sm_run<float, N, 8>(h_input, baseline, batch);
+    // fft_tc_sm_run<float, N, 8>(h_input, baseline, batch);
 
     // fft_tc_sm_run<float, N, 16>(h_input, baseline, batch);
 }

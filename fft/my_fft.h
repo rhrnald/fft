@@ -8,6 +8,7 @@
 #include <stdio.h>
 
 #include "utils.h"
+#include "helper.h"
 
 #define CHECK_CUDA(call)                                                       \
     do {                                                                       \
@@ -39,7 +40,8 @@ __global__ void fft_kernel_radix64_batch16_half(half2 *d_data,
 __global__ void fft_kernel_radix4096_batch1(cuFloatComplex *d_data,
                                             const cuFloatComplex *W_4096);
 
-template <typename T, long long N> void my_fft(T *d_data, T *h_output) {
+template <typename T, unsigned int N>
+static inline PerfStat my_fft_perf(vec2_t<T> *d_data, int batch) {
     static constexpr unsigned int inside_repeats = 10000;
     static constexpr unsigned int kernel_runs = 1;
     static constexpr unsigned int warm_up_runs = 1;
@@ -47,13 +49,14 @@ template <typename T, long long N> void my_fft(T *d_data, T *h_output) {
     cudaStream_t stream;
     CHECK_CUDA(cudaStreamCreate(&stream));
 
-    T h_W_64[64];
-    T h_W_4096[4096];
+    using T2 = std::conditional_t<std::is_same_v<T, float>, float2, half2>;
+    T2 h_W_64[64];
+    // T h_W_4096[4096];
 
     auto make_val = [](float re, float im) {
-        if constexpr (std::is_same_v<T, cuFloatComplex>) {
-            return make_cuFloatComplex(re, im);
-        } else if constexpr (std::is_same_v<T, half2>) {
+        if constexpr (std::is_same_v<T, float>) {
+            return make_float2(re, im);
+        } else if constexpr (std::is_same_v<T, half>) {
             // float -> half2 변환 (round-to-nearest-even)
             return __floats2half2_rn(re, im);
         } else {
@@ -66,44 +69,30 @@ template <typename T, long long N> void my_fft(T *d_data, T *h_output) {
         h_W_64[i] = make_val(cosf(theta), sinf(theta));
     }
 
-    for (int i = 0; i < 4096; ++i) {
-        float theta = -2.0f * PI * i / 4096.0f;
-        h_W_4096[i] = make_val(cosf(theta), sinf(theta));
-    }
+    // for (int i = 0; i < 4096; ++i) {
+    //     float theta = -2.0f * PI * i / 4096.0f;
+    //     h_W_4096[i] = make_val(cosf(theta), sinf(theta));
+    // }
 
-    T *W_64, *W_4096;
-    CHECK_CUDA(cudaMalloc(&W_64, 64 * sizeof(T)));
-    CHECK_CUDA(cudaMalloc(&W_4096, 4096 * sizeof(T)));
+    vec2_t<T> *W_64, *W_4096;
+    CHECK_CUDA(cudaMalloc(&W_64, 64 * sizeof(T2)));
+    // CHECK_CUDA(cudaMalloc(&W_4096, 4096 * sizeof(T)));
     CHECK_CUDA(
-        cudaMemcpy(W_64, h_W_64, 64 * sizeof(T), cudaMemcpyHostToDevice));
-    CHECK_CUDA(
-        cudaMemcpy(W_4096, h_W_4096, 4096 * sizeof(T), cudaMemcpyHostToDevice));
+        cudaMemcpy(W_64, h_W_64, 64 * sizeof(T2), cudaMemcpyHostToDevice));
+    // CHECK_CUDA(
+    //     cudaMemcpy(W_4096, h_W_4096, 4096 * sizeof(T), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaDeviceSynchronize());
-
-    fft_kernel_radix64_batch16<<<N / 1024, 32, 32 * 2 * (32/2 + 1) * sizeof(cuFloatComplex), stream>>>(
-                    d_data, W_64, 1);
-
-    T *output = (T *)malloc(sizeof(T) * N);
-    CHECK_CUDA(cudaMemcpy(output, d_data, sizeof(T) * N, cudaMemcpyDeviceToHost));
-
-    const double max_err =
-        static_cast<double>(check_max_abs_err(output, h_output, N));
-
-    printf("max_err: %f\n", max_err);
 
     cudaFuncSetAttribute(fft_kernel_radix64_batch16, cudaFuncAttributePreferredSharedMemoryCarveout, 75);
 
-    cudaStreamSynchronize(stream);
-
-    double elapsed_time_repeat = measure_execution_ms(
+    // R 회와 2R 회를 이용해 per-iteration kernel-only 시간 산출
+    double t_R = measure_execution_ms(
         [&](cudaStream_t stream) {
-            if constexpr (std::is_same_v<T, cuFloatComplex>) {
-                fft_kernel_radix64_batch16<<<N / 1024, 32, 32 * 2 * (32/2 + 1) * sizeof(cuFloatComplex), stream>>>(
+            if constexpr (std::is_same_v<T, float>) {
+                fft_kernel_radix64_batch16<<<batch / 16, 32, 32 * 2 * (32/2 + 1) * sizeof(T2), stream>>>(
                     d_data, W_64, inside_repeats);
-                // fft_kernel_radix4096_batch1<<<N / 4096, dim3(32, 4), 0,
-                // stream>>>(d_data, W_4096, inside_repeats);
-            } else if constexpr (std::is_same_v<T, half2>) {
-                fft_kernel_radix64_batch16_half<<<N / 1024, 32, 32 * 2 * (32/2 + 1) * sizeof(half2), stream>>>(
+            } else if constexpr (std::is_same_v<T, half>) {
+                fft_kernel_radix64_batch16_half<<<batch / 16, 32, 32 * 2 * (32/2 + 1) * sizeof(T2), stream>>>(
                     d_data, W_64, inside_repeats);
                 assert("4096 half is not supported" && false);
             }
@@ -112,15 +101,13 @@ template <typename T, long long N> void my_fft(T *d_data, T *h_output) {
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    double elapsed_time_repeatx2 = measure_execution_ms(
+    double t_2R = measure_execution_ms(
         [&](cudaStream_t stream) {
-            if constexpr (std::is_same_v<T, cuFloatComplex>) {
-                fft_kernel_radix64_batch16<<<N / 1024, 32, 32 * 2 * (32/2 + 1) * sizeof(cuFloatComplex), stream>>>(
+            if constexpr (std::is_same_v<T, float>) {
+                fft_kernel_radix64_batch16<<<batch / 16, 32, 32 * 2 * (32/2 + 1) * sizeof(T2), stream>>>(
                     d_data, W_64, 2 * inside_repeats);
-                // fft_kernel_radix4096_batch1<<<N / 4096, dim3(32, 4), 0,
-                // stream>>>(d_data, W_4096, 2*inside_repeats);
-            } else if constexpr (std::is_same_v<T, half2>) {
-                fft_kernel_radix64_batch16_half<<<N / 1024, 32, 32 * 2 * (32/2 + 1) * sizeof(half2), stream>>>(
+            } else if constexpr (std::is_same_v<T, half>) {
+                fft_kernel_radix64_batch16_half<<<batch / 16, 32, 32 * 2 * (32/2 + 1) * sizeof(T2), stream>>>(
                     d_data, W_64, 2 * inside_repeats);
                 assert("4096 half is not supported" && false);
             }
@@ -128,19 +115,88 @@ template <typename T, long long N> void my_fft(T *d_data, T *h_output) {
         warm_up_runs, kernel_runs, stream);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    cudaEvent_t start, stop;
-    // CHECK_CUDA(cudaEventCreate(&start));
-    // CHECK_CUDA(cudaEventCreate(&stop));
-    // CHECK_CUDA(cudaEventRecord(start));
-    // CHECK_CUDA(cudaEventRecord(stop));
-    // CHECK_CUDA(cudaEventSynchronize(stop));
-    // float elapsed_time;
-    // CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
-    // printf("elapsed_time: %f ms\n", elapsed_time/10000);
-    // CHECK_CUDA(cudaEventDestroy(start));
-    // CHECK_CUDA(cudaEventDestroy(stop));
-    std::cout << "elapsed_time_repeat: " << elapsed_time_repeat << std::endl;
+    
+    double comp_ms = (t_2R - t_R) / static_cast<double>(inside_repeats);
 
-    printf("computation time: %.8f ms\n",
-           (elapsed_time_repeatx2 - elapsed_time_repeat) / inside_repeats);
+    double e2e_ms = measure_execution_ms(
+        [&](cudaStream_t stream) {
+            fft_kernel_radix64_batch16<<<batch / 16, 32, 32 * 2 * (32/2 + 1) * sizeof(T2), stream>>>(
+                d_data, W_64, 1);
+        },
+        warm_up_runs, kernel_runs, stream);
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+    
+    double comm_ms = measure_execution_ms(
+        [&](cudaStream_t stream) {
+            fft_kernel_radix64_batch16<<<batch / 16, 32, 32 * 2 * (32/2 + 1) * sizeof(T2), stream>>>(
+                d_data, W_64, 0);
+        },
+        warm_up_runs, kernel_runs, stream);
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    CHECK_CUDA(cudaStreamDestroy(stream));
+    return {comp_ms, e2e_ms, comm_ms};
+}
+
+template <typename T, unsigned int N>
+static inline void my_fft_val(vec2_t<T> *d_data, int batch) {
+    static constexpr unsigned int inside_repeats = 1;
+    static constexpr unsigned int kernel_runs = 1;
+    static constexpr unsigned int warm_up_runs = 0;
+
+    cudaStream_t stream;
+    CHECK_CUDA(cudaStreamCreate(&stream));
+
+    cudaFuncSetAttribute(fft_kernel_radix64_batch16, cudaFuncAttributePreferredSharedMemoryCarveout, 75);
+
+    using T2 = std::conditional_t<std::is_same_v<T, float>, float2, half2>;
+    T2 h_W_64[64];
+    // T h_W_4096[4096];
+
+    auto make_val = [](float re, float im) {
+        if constexpr (std::is_same_v<T, float>) {
+            return make_float2(re, im);
+        } else if constexpr (std::is_same_v<T, half>) {
+            // float -> half2 변환 (round-to-nearest-even)
+            return __floats2half2_rn(re, im);
+        } else {
+            static_assert(!std::is_same_v<T, T>, "Unsupported T");
+        }
+    };
+
+    for (int i = 0; i < 64; ++i) {
+        float theta = -2.0f * PI * i / 64.0f;
+        h_W_64[i] = make_val(cosf(theta), sinf(theta));
+    }
+
+    T2 *W_64;
+    CHECK_CUDA(cudaMalloc(&W_64, 64 * sizeof(T2)));
+    CHECK_CUDA(
+        cudaMemcpy(W_64, h_W_64, 64 * sizeof(T2), cudaMemcpyHostToDevice));
+
+    (void)measure_execution_ms(
+        [&](cudaStream_t s) {
+            fft_kernel_radix64_batch16<<<batch / 16, 32, 32 * 2 * (32/2 + 1) * sizeof(T2), s>>>(
+                d_data, W_64, inside_repeats);
+        },
+        warm_up_runs, kernel_runs, stream);
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    CHECK_CUDA(cudaStreamDestroy(stream));
+}
+
+template <unsigned int N>
+void my_fft_benchmark(float2 *h_input, half2 *h_input_half, float2 *baseline,
+                         int batch) {
+    benchmark_run<float, N, 4>(
+        [&](float2* d_custom, int B) {
+            my_fft_val<float, N>(d_custom, B);
+        }, 
+        [&](float2* d_custom, int B) {
+            return my_fft_perf<float, N>(d_custom, B);
+        },
+        h_input, baseline, batch);
 }
