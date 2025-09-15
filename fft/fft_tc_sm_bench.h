@@ -109,6 +109,8 @@ static inline void fft_tc_sm_val(vec2_t<T> *d_data, unsigned int B) {
 
     int max_bank_padding = 16;
 
+
+
     cudaStream_t stream;
     CHECK_CUDA(cudaStreamCreate(&stream));
 
@@ -127,8 +129,10 @@ static inline void fft_tc_sm_val(vec2_t<T> *d_data, unsigned int B) {
 }
 
 template <typename T, unsigned int N, unsigned int radix>
-void fft_tc_sm_run(vec2_t<T> *h_data, float2 *baseline, unsigned int B) {
+void fft_tc_sm_run(vec2_t<T> *h_data, float2 *h_answer, unsigned int B) {
     using T2 = vec2_t<T>;
+
+    printf("running tc_sm_fft (type=%s, N=%d, radix=%d, batch=%d)\n", type_cstr<T>(), N, radix, B);
 
     // H2D
     T2 *d_custom = nullptr;
@@ -138,14 +142,13 @@ void fft_tc_sm_run(vec2_t<T> *h_data, float2 *baseline, unsigned int B) {
 
     // 검증용 실행
     fft_tc_sm_val<T, N, radix>(d_custom, B);
-
     // 첫 배치 N개만 D2H해서 오차 계산
-    T2 *h_custom = static_cast<T2 *>(std::malloc(sizeof(T2) * N));
+    T2 *h_custom = static_cast<T2 *>(std::malloc(sizeof(T2) * N * B));
     CHECK_CUDA(
-        cudaMemcpy(h_custom, d_custom, sizeof(T2) * N, cudaMemcpyDeviceToHost));
+        cudaMemcpy(h_custom, d_custom, sizeof(T2) * N * B, cudaMemcpyDeviceToHost));
 
     const double max_err =
-        static_cast<double>(check_max_abs_err(baseline, h_custom, N));
+        static_cast<double>(check_max_abs_err(h_answer, h_custom, N * B));
 
     // 성능 측정
     const auto perf = fft_tc_sm_perf<T, N, radix>(d_custom, B);
@@ -165,12 +168,16 @@ void fft_tc_sm_run(vec2_t<T> *h_data, float2 *baseline, unsigned int B) {
     std::free(h_custom);
 }
 
+
 template <unsigned int N>
-void fft_tc_sm_benchmark(float2 *h_input, half2 *h_input_half, float2 *baseline,
-                         int batch) {
-    fft_tc_sm_run<half, N, 8>(h_input_half, baseline, batch);
+void fft_tc_sm_benchmark(float2 *h_input, half2 *h_input_half, float2 *h_answer, unsigned int batch) {
+    
+    fft_tc_sm_run<half, N, 8>(h_input_half, h_answer, batch);
     // fft_tc_sm_run<half, N, 16>(h_input_half, baseline, batch);
-    fft_tc_sm_run<float, N, 8>(h_input, baseline, batch);
+    fft_tc_sm_run<float, N, 8>(h_input, h_answer, batch);
 
     // fft_tc_sm_run<float, N, 16>(h_input, baseline, batch);
+
+    free(h_input);
+    free(h_input_half);
 }

@@ -218,6 +218,24 @@ __device__ void permute_radix4_arith(T &a, T &b, T &c, T &d, int pattern) {
           tmp2[3] * (pattern == 2) + tmp2[0] * (pattern == 3);
 }
 template <typename T>
+__device__ __forceinline__ void swap_inline(T &x, T &y) {
+    T tmp = x;
+    x = y;
+    y = tmp;
+}
+template <typename T>
+__device__ void permute_radix4_tmp(T &a, T &b, T &c, T &d, T &e, T &f, T &g, T &h, int pattern) {
+    if (pattern == 1 || pattern == 3) {
+        swap_inline(a,e);
+        swap_inline(b,f);
+        swap_inline(c,g);
+        swap_inline(d,h);
+    }
+    swap_inline(b,c);
+    swap_inline(f,g);
+}
+
+template <typename T>
 __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     // version 0
     // T t0 = a, t1 = b, t2 = c, t3 = d;
@@ -357,10 +375,11 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
 
 // in-place device kernel
 template <int N>
-__device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
+__device__ void fft_kernel_r64_b16(cuFloatComplex *_reg,
                                    const cuFloatComplex *W_4096) {
     float reg_frag_zero[TC_M_DEVICE_CONST * TC_N_DEVICE_CONST /
                         WARP_SIZE_DEVICE_CONST];
+    float *reg = reinterpret_cast<float*>(_reg);
 
     for (int i = 0;
          i < TC_M_DEVICE_CONST * TC_N_DEVICE_CONST / WARP_SIZE_DEVICE_CONST;
@@ -380,10 +399,10 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
             float reg_frag_d[TC_M_DEVICE_CONST * TC_N_DEVICE_CONST /
                              WARP_SIZE_DEVICE_CONST];
 
-            reg_frag_a[0] = reg[j].x;
-            reg_frag_a[1] = reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].x;
-            reg_frag_a[2] = reg[j].y;
-            reg_frag_a[3] = reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].y;
+            reg_frag_a[0] = reg[j*2];
+            reg_frag_a[1] = reg[j*2 + N_DEVICE_CONST / RADIX_DEVICE_CONST];
+            reg_frag_a[2] = reg[j*2+1];
+            reg_frag_a[3] = reg[j*2+1 + N_DEVICE_CONST / RADIX_DEVICE_CONST];
 
             // w = w_4stride
             // b = [ w^ i ( k + Nj) ] ^ T
@@ -405,13 +424,13 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
             mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b,
                                         reg_frag_zero);
 
-            reg[j].x = reg_frag_d[0];
-            reg[j].y = reg_frag_d[1];
-            reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].x = reg_frag_d[2];
-            reg[j + N_DEVICE_CONST / RADIX_DEVICE_CONST].y = reg_frag_d[3];
+            reg[j*2] = reg_frag_d[0];
+            reg[j*2+1] = reg_frag_d[1];
+            reg[j*2 + N_DEVICE_CONST / RADIX_DEVICE_CONST] = reg_frag_d[2];
+            reg[j*2+1 + N_DEVICE_CONST / RADIX_DEVICE_CONST] = reg_frag_d[3];
         }
 
-        if (i == 0) {
+        if (i < ITER_DEVICE_CONST - 1) {
             for (int jk = 0; jk < 8; jk++) {
                 int j = (jk / stride) * (4 * stride);
                 int k = jk % stride;
@@ -421,24 +440,11 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *reg,
                 // 7  4  5  6       13 1  5  9
                 // 10 11 8  9	->  10 14 2  6
                 // 13 14 15 12		7  11 15 3
-                permute_radix4_local(reg[k + j], reg[k + j + stride],
-                                     reg[k + j + stride * 2],
-                                     reg[k + j + stride * 3], laneid & 3);
-            }
-        }
-        if (i == 1) {
-            for (int jk = 0; jk < 8; jk++) {
-                int j = (jk / stride) * (4 * stride);
-                int k = jk % stride;
-                // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
-                // t0 t1 t2 t3
-                // 0  1  2  3       0  4  8  12
-                // 7  4  5  6       13 1  5  9
-                // 10 11 8  9	->  10 14 2  6
-                // 13 14 15 12		7  11 15 3
-                permute_radix4_branch(reg[k + j], reg[k + j + stride],
-                                      reg[k + j + stride * 2],
-                                      reg[k + j + stride * 3], laneid & 3);
+                permute_radix4_tmp(reg[2*(k + j)], reg[2*(k+j)+1],
+                                     reg[2*(k + j + stride)], reg[2*(k + j + stride)+1],
+                                     reg[2*(k + j + stride * 2)], reg[2*(k + j + stride*2)+1],
+                                     reg[2*(k + j + stride * 3)],reg[2*(k + j + stride*3)+1],
+                                        laneid & 3);
             }
         }
         /*if (i < ITER_DEVICE_CONST - 1) {
@@ -642,47 +648,47 @@ fft_kernel_radix64_batch16(cuFloatComplex *d_data,
     }
 
     __syncwarp();
-    // for (int i = 0; i < ept / 2; i++) {
-    //     reg[i] = s_data[(laneid / 2) * (warp_size + 1) +
-    //                     reverse_2bit_groups<4>(i) + (ept / 2) * (laneid %
-    //                     2)];
-    //     reg[i + ept / 2] =
-    //         s_data[(ept / 2) * (warp_size + 1) +
-    //                (laneid / 2) * (warp_size + 1) + reverse_2bit_groups<4>(i)
-    //                + (ept / 2) * (laneid % 2)];
-    // }
+    for (int i = 0; i < ept / 2; i++) {
+        reg[i] = s_data[(laneid / 2) * (warp_size + 1) +
+                        reverse_2bit_groups<4>(i) + (ept / 2) * (laneid %
+                        2)];
+        reg[i + ept / 2] =
+            s_data[(ept / 2) * (warp_size + 1) +
+                   (laneid / 2) * (warp_size + 1) + reverse_2bit_groups<4>(i)
+                   + (ept / 2) * (laneid % 2)];
+    }
 
     for (unsigned int i = 0; i < repeat; i++) {
-        for (int i = 0; i < ept / 2; i++) {
-            reg[i] =
-                s_data[(laneid / 2) * (warp_size + 1) +
-                       reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
-            reg[i + ept / 2] =
-                s_data[(ept / 2) * (warp_size + 1) +
-                       (laneid / 2) * (warp_size + 1) +
-                       reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
-        }
+        // for (int i = 0; i < ept / 2; i++) {
+        //     reg[i] =
+        //         s_data[(laneid / 2) * (warp_size + 1) +
+        //                reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
+        //     reg[i + ept / 2] =
+        //         s_data[(ept / 2) * (warp_size + 1) +
+        //                (laneid / 2) * (warp_size + 1) +
+        //                reverse_2bit_groups<4>(i) + (ept / 2) * (laneid % 2)];
+        // }
 
         fft_kernel_r64_b16<64>(reg, W_64);
 
-        for (int i = 0; i < ept / 2; i++) {
-            s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
-                reg[i];
-            s_data[(ept / 2) * (warp_size + 1) +
-                   (warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
-                reg[i + ept / 2];
-        }
-        __syncwarp();
+        // for (int i = 0; i < ept / 2; i++) {
+        //     s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
+        //         reg[i];
+        //     s_data[(ept / 2) * (warp_size + 1) +
+        //            (warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
+        //         reg[i + ept / 2];
+        // }
+        // __syncwarp();
     }
 
     // write to smem
-    // for (int i = 0; i < ept / 2; i++) {
-    //     s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
-    //     reg[i]; s_data[(ept / 2) * (warp_size + 1) + (warp_size + 1) *
-    //     (laneid / 2) +
-    //            16 * (laneid % 2) + i] = reg[i + ept / 2];
-    // }
-    // __syncwarp();
+    for (int i = 0; i < ept / 2; i++) {
+        s_data[(warp_size + 1) * (laneid / 2) + 16 * (laneid % 2) + i] =
+        reg[i]; s_data[(ept / 2) * (warp_size + 1) + (warp_size + 1) *
+        (laneid / 2) +
+               16 * (laneid % 2) + i] = reg[i + ept / 2];
+    }
+    __syncwarp();
 
     // write to gmem
     for (int i = 0; i < ept; i++)

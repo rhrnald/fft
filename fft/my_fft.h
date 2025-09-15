@@ -129,3 +129,11 @@ template <typename T, long long N> void my_fft(T *d_data) {
     printf("computation time: %.8f ms\n",
            (elapsed_time_repeatx2 - elapsed_time_repeat) / inside_repeats);
 }
+
+template<unsigned int N>
+void my_fft_benchmark(float2 *h_input, half2 *h_input_half, float2 *h_answer, unsigned int batch) {
+    float2 *d_input;
+    half2 *d_input_half;
+
+    my_fft(T *d_data)
+}
