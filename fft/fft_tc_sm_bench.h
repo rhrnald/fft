@@ -86,6 +86,8 @@ static inline void fft_tc_sm_val(vec2_t<T> *d_data, unsigned int B) {
 
     int max_bank_padding = 16;
 
+
+
     cudaStream_t stream;
     CHECK_CUDA(cudaStreamCreate(&stream));
 
@@ -128,4 +130,7 @@ void fft_tc_sm_benchmark(float2 *h_input, half2 *h_input_half, float2 *baseline,
     // fft_tc_sm_run<float, N, 8>(h_input, baseline, batch);
 
     // fft_tc_sm_run<float, N, 16>(h_input, baseline, batch);
+
+    free(h_input);
+    free(h_input_half);
 }

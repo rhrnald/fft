@@ -8,7 +8,6 @@
 #include <mma.h>
 
 #include "my_fft.h"
-#include "utils.h"
 
 #define TC_M_DEVICE_CONST 16
 #define TC_N_DEVICE_CONST 8
@@ -265,6 +264,24 @@ __device__ void permute_radix4_arith(T &a, T &b, T &c, T &d, int pattern) {
           tmp2[3] * (pattern == 2) + tmp2[0] * (pattern == 3);
 }
 template <typename T>
+__device__ __forceinline__ void swap_inline(T &x, T &y) {
+    T tmp = x;
+    x = y;
+    y = tmp;
+}
+template <typename T>
+__device__ void permute_radix4_tmp(T &a, T &b, T &c, T &d, T &e, T &f, T &g, T &h, int pattern) {
+    if (pattern == 1 || pattern == 3) {
+        swap_inline(a,e);
+        swap_inline(b,f);
+        swap_inline(c,g);
+        swap_inline(d,h);
+    }
+    swap_inline(b,c);
+    swap_inline(f,g);
+}
+
+template <typename T>
 __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     // version 0
     // T t0 = a, t1 = b, t2 = c, t3 = d;
@@ -402,24 +419,6 @@ __device__ void permute_radix4(T &a, T &b, T &c, T &d, int pattern) {
     // tmp2[0]*(pattern==3);
 }
 
-template <typename T>
-__device__ __forceinline__ void swap_inline(T &x, T &y) {
-    T tmp = x;
-    x = y;
-    y = tmp;
-}
-template <typename T>
-__device__ void permute_radix4_tmp(T &a, T &b, T &c, T &d, T &e, T &f, T &g, T &h, int pattern) {
-    if (pattern == 1 || pattern == 3) {
-        swap_inline(a,e);
-        swap_inline(b,f);
-        swap_inline(c,g);
-        swap_inline(d,h);
-    }
-    swap_inline(b,c);
-    swap_inline(f,g);
-}
-
 // in-place device kernel
 template <int N>
 __device__ void fft_kernel_r64_b16(cuFloatComplex *_reg,
@@ -467,6 +466,24 @@ __device__ void fft_kernel_r64_b16(cuFloatComplex *_reg,
             reg[j*2+1] = reg_frag_d[1];
             reg[j*2 + N_DEVICE_CONST / RADIX_DEVICE_CONST] = reg_frag_d[2];
             reg[j*2+1 + N_DEVICE_CONST / RADIX_DEVICE_CONST] = reg_frag_d[3];
+        }
+
+        if (i < ITER_DEVICE_CONST - 1) {
+            for (int jk = 0; jk < 8; jk++) {
+                int j = (jk / stride) * (4 * stride);
+                int k = jk % stride;
+                // int perm[4][4]={0,3,2,1},{1,0,3,2},{2,1,0,3},{3,2,1,0};
+                // t0 t1 t2 t3
+                // 0  1  2  3       0  4  8  12
+                // 7  4  5  6       13 1  5  9
+                // 10 11 8  9	->  10 14 2  6
+                // 13 14 15 12		7  11 15 3
+                permute_radix4_tmp(reg[2*(k + j)], reg[2*(k+j)+1],
+                                     reg[2*(k + j + stride)], reg[2*(k + j + stride)+1],
+                                     reg[2*(k + j + stride * 2)], reg[2*(k + j + stride*2)+1],
+                                     reg[2*(k + j + stride * 3)],reg[2*(k + j + stride*3)+1],
+                                        laneid & 3);
+            }
         }
         // if (i < ITER_DEVICE_CONST - 1) {
         //     for (int jk = 0; jk < 8; jk++) {
