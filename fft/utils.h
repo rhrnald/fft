@@ -47,10 +47,7 @@ inline constexpr unsigned LOG2P_builtin = [] {
     return __builtin_ctz(N); // pow2에서 log2(N)과 동일
 }();
 
-template <class T> struct vec2_of;
-template <> struct vec2_of<float> { using type = float2; };
-template <> struct vec2_of<half> { using type = half2; };
-template <class T> using vec2_t = typename vec2_of<std::remove_cv_t<T>>::type;
+template <class T> using vec2_t = typename std::conditional_t<std::is_same_v<std::remove_cv_t<T>, float>, float2, half2>;
 
 template <int r, int N>
 __device__ __forceinline__ int reverse_bit_groups(int x) {
@@ -59,6 +56,10 @@ __device__ __forceinline__ int reverse_bit_groups(int x) {
     for (int i = 0; i < num_groups; ++i) {
         int group = (x >> (r * i)) & ((1 << r) - 1);
         result |= group << (r * (num_groups - 1 - i));
+    }
+    for (int i = 0; i < N % r; i++) {
+        int bit = (x >> (r * num_groups + i)) & 1;
+        result = (result << 1) | bit;
     }
     return result;
 }

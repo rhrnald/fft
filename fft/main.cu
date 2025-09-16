@@ -37,7 +37,7 @@ int main() {
     my_fft_benchmark<N>(h_input, h_input_half, h_answer, batch);
     // stat::print_table();
 
-    // fft_tc_sm_benchmark<64>(h_input, h_input_half, h_answer, batch);
+    fft_tc_sm_benchmark<N>(h_input, h_input_half, h_answer, batch);
     // stat::print_table();
 
     // fft_tc_sm_benchmark<256>(h_input, h_input_half, answer, batch);

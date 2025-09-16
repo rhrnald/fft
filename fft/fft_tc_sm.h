@@ -34,7 +34,7 @@ mma_m16n16k16_tf32_fp32_rowcol(unsigned int d[8], const unsigned int a[8],
                  "{%4, %5, %6, %7}, "
                  "{%8, %9}, "
                  "{%10, %11, %12, %13};\n"
-                 : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3])
+                 : "+r"(d[0]), "+r"(d[1]), "+r"(d[2]), "+r"(d[3])
                  : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]),
                    "r"(b[0]), "r"(b[1]),
                    "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
@@ -43,7 +43,7 @@ mma_m16n16k16_tf32_fp32_rowcol(unsigned int d[8], const unsigned int a[8],
                  "{%4, %5, %6, %7}, "
                  "{%8, %9}, "
                  "{%10, %11, %12, %13};\n"
-                 : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3])
+                 : "+r"(d[0]), "+r"(d[1]), "+r"(d[2]), "+r"(d[3])
                  : "r"(a[4]), "r"(a[5]), "r"(a[6]), "r"(a[7]),
                    "r"(b[2]), "r"(b[3]),
                    "r"(d[0]), "r"(d[1]), "r"(d[2]), "r"(d[3]));
@@ -53,7 +53,7 @@ mma_m16n16k16_tf32_fp32_rowcol(unsigned int d[8], const unsigned int a[8],
                  "{%4, %5, %6, %7}, "
                  "{%8, %9}, "
                  "{%10, %11, %12, %13};\n"
-                 : "=r"(d[4]), "=r"(d[5]), "=r"(d[6]), "=r"(d[7])
+                 : "+r"(d[4]), "+r"(d[5]), "+r"(d[6]), "+r"(d[7])
                  : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]),
                    "r"(b[4]), "r"(b[5]),
                    "r"(c[4]), "r"(c[5]), "r"(c[6]), "r"(c[7]));
@@ -62,7 +62,7 @@ mma_m16n16k16_tf32_fp32_rowcol(unsigned int d[8], const unsigned int a[8],
                  "{%4, %5, %6, %7}, "
                  "{%8, %9}, "
                  "{%10, %11, %12, %13};\n"
-                 : "=r"(d[4]), "=r"(d[5]), "=r"(d[6]), "=r"(d[7])
+                 : "+r"(d[4]), "+r"(d[5]), "+r"(d[6]), "+r"(d[7])
                  : "r"(a[4]), "r"(a[5]), "r"(a[6]), "r"(a[7]),
                    "r"(b[6]), "r"(b[7]),
                    "r"(d[4]), "r"(d[5]), "r"(d[6]), "r"(d[7]));
@@ -171,7 +171,7 @@ __device__ void cc_kernel_fft_sm(vec2_t<T> *smem_batch0,
                                       unsigned int N) {
     using T2 = vec2_t<T>;
     T2 tmp[4];
-    for (int jk = threadIdx.x; jk < N / 2; jk += 32) {
+    for (int jk = threadIdx.x%4; jk < N / 2; jk += 4) {
         int j = (jk / stride) * stride * 2;
         int k = jk % stride;
 
@@ -188,14 +188,14 @@ __device__ void cc_kernel_fft_sm(vec2_t<T> *smem_batch0,
         }
 
         // ▶ 여기만 교체
-        tmp[2] = cmul<T>(tmp[2], w);
+        tmp[1] = cmul<T>(tmp[1], w);
         tmp[3] = cmul<T>(tmp[3], w);
 
-        smem_batch0[j + k] = tmp[0] + tmp[2];
-        smem_batch0[j + k + stride] = tmp[0] - tmp[2];
+        smem_batch0[j + k] = tmp[0] + tmp[1];
+        smem_batch0[j + k + stride] = tmp[0] - tmp[1];
 
-        smem_batch1[j + k] = tmp[1] + tmp[3];
-        smem_batch1[j + k + stride] = tmp[1] - tmp[3];
+        smem_batch1[j + k] = tmp[2] + tmp[3];
+        smem_batch1[j + k + stride] = tmp[2] - tmp[3];
     }
 }
 
@@ -218,10 +218,10 @@ void fill_reg_b_sm<half, 8, false>(half b[], unsigned int stride, unsigned int k
     auto w2 =
         W((i + 4) * (k + stride * j) + (2 * stride * ((threadIdx.x / 4) & 1)),
           8 * stride);
-    auto w3 = (i & 1) ? make_cuFloatComplex(-w1.x, -w1.y)
-                      : make_cuFloatComplex(w1.x, w1.y);
-    auto w4 = (i & 1) ? make_cuFloatComplex(-w2.x, -w2.y)
-                      : make_cuFloatComplex(w2.x, w2.y);
+    auto w3 = (i & 1) ? make_float2(-w1.x, -w1.y)
+                      : make_float2(w1.x, w1.y);
+    auto w4 = (i & 1) ? make_float2(-w2.x, -w2.y)
+                      : make_float2(w2.x, w2.y);
 
     // auto w3 = W((i)*(k+stride*(j+4))+(2*stride *
     // ((threadIdx.x/4)&1)),8*stride); auto w4 =
@@ -261,13 +261,6 @@ __device__ void tc_kernel_fft_tc_sm<half,8, false>(
     half2 reg_frag_a[element_per_frag / 2];
     half2 reg_frag_b[element_per_frag / 2];
     half2 reg_frag_d[element_per_frag / 2];
-
-    // __syncthreads();
-    // if(blockIdx.x==0 && threadIdx.y==0 && threadIdx.x==0){
-    //     for(int i=0; i< 64; i++) printf("(%f,%f) ", __half2float(smem_batch0[i].x), __half2float(smem_batch0[i].y)); printf("\n");
-    //     for(int i=0; i< 64; i++) printf("(%f,%f) ", __half2float(smem_batch1[i].x), __half2float(smem_batch1[i].y)); printf("\n");
-    // }
-    // __syncthreads();
     
     for (int jk = 0; jk < N / element_per_frag; jk++) {
         int j = (jk / stride) * stride * element_per_frag;
@@ -315,10 +308,10 @@ fill_reg_b_sm<float, 8, false>(float b[], unsigned int stride, unsigned int k, u
     auto w2 =
         W((i + 4) * (k + stride * j) + (2 * stride * ((threadIdx.x / 4) & 1)),
           8 * stride);
-    auto w3 = (i & 1) ? make_cuFloatComplex(-w1.x, -w1.y)
-                      : make_cuFloatComplex(w1.x, w1.y);
-    auto w4 = (i & 1) ? make_cuFloatComplex(-w2.x, -w2.y)
-                      : make_cuFloatComplex(w2.x, w2.y);
+    auto w3 = (i & 1) ? make_float2(-w1.x, -w1.y)
+                      : make_float2(w1.x, w1.y);
+    auto w4 = (i & 1) ? make_float2(-w2.x, -w2.y)
+                      : make_float2(w2.x, w2.y);
 
     // auto w3 = W((i)*(k+stride*(j+4))+(2*stride *
     // ((threadIdx.x/4)&1)),8*stride); auto w4 =
@@ -364,8 +357,8 @@ tc_kernel_fft_tc_sm<float, 8, false>(float2 *smem_batch0,
 
     // __syncthreads();
     // if(blockIdx.x==0 && threadIdx.y==0 && threadIdx.x==0){
-    //     for(int i=0; i< 64; i++) printf("(%f,%f) ", smem_batch0[i].x, smem_batch0[i].y); printf("\n");
-    //     for(int i=0; i< 64; i++) printf("(%f,%f) ", smem_batch1[i].x, smem_batch1[i].y); printf("\n");
+    //     for(int i=0; i< N; i++) printf("(%f,%f) ", smem_batch0[i].x, smem_batch0[i].y); printf("\n");
+    //     for(int i=0; i< N; i++) printf("(%f,%f) ", smem_batch1[i].x, smem_batch1[i].y); printf("\n");
     // }
     // __syncthreads();
 
@@ -418,22 +411,17 @@ __global__ void kernel_fft_tc_sm(vec2_t<T> *d_data,
     // Tensor core tile: m16n16k16 (A:half, B:half, C/D:float)
     constexpr unsigned int batch = 16;
     constexpr unsigned int warp_size = 32;
-    constexpr unsigned int ept =
-        (N * batch) / warp_size; // elements per thread (if needed)
     
     constexpr unsigned int bank_padding = 9;
 
     constexpr unsigned int LOG2N = LOG2P_builtin<N>;
     constexpr unsigned int LOG2R = LOG2P_builtin<radix>;
 
-
     // Dynamic shared memory for this block (typed). Size is provided at kernel
     // launch.
-    extern __shared__ void *__smem[];
-    auto smem = (T2 *)__smem + (N + bank_padding) * batch * threadIdx.y;
-
-    // Per-lane constants/temporaries
-    const int laneid = threadIdx.x & 31;
+    extern __shared__ void* smem_data[];
+    T2* smem_data_typed = reinterpret_cast<T2*>(smem_data);
+    T2* smem = smem_data_typed + (N + bank_padding) * batch * threadIdx.y;
 
     // --- Load: gmem -> smem (사용자 구현부) ---
     for (int j = 0; j < batch; j++) {
@@ -445,13 +433,13 @@ __global__ void kernel_fft_tc_sm(vec2_t<T> *d_data,
     }
     __syncwarp();
 
-    auto smem_batch0 = smem + (N + bank_padding) * (threadIdx.x / 4);
-    auto smem_batch1 = smem + (N + bank_padding) * (threadIdx.x / 4) +
+    T2* smem_batch0 = smem + (N + bank_padding) * (threadIdx.x / 4);
+    T2* smem_batch1 = smem + (N + bank_padding) * (threadIdx.x / 4) +
                        (N + bank_padding) * (batch / 2);
 
     // Zero fragment for the MMA accumulator C
     for (int iter = 0; iter < inside_repeats; iter++) {
-        for (unsigned int i = 0; i < LOG2N; i += LOG2R) {
+        for (unsigned int i = 0; i < LOG2N/LOG2R*LOG2R; i += LOG2R) {
             unsigned int stride = 1 << i;
             tc_kernel_fft_tc_sm<T, radix, inverse>(smem_batch0,
                                                         smem_batch1, stride, N);
@@ -464,7 +452,6 @@ __global__ void kernel_fft_tc_sm(vec2_t<T> *d_data,
         }
     }
 
-    // TODO : LOG2N % LOG2R 인 경우 처리
     for (int j = 0; j < batch; j++) {
         for (int i = threadIdx.x; i < N; i += warp_size) {
             d_data[i + N * j + threadIdx.y * N * batch +

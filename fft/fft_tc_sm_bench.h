@@ -19,7 +19,7 @@ static inline PerfStat fft_tc_sm_perf(vec2_t<T> *d_data, unsigned int B) {
     static constexpr unsigned int warm_up_runs = 1;
     static constexpr unsigned int warp_per_block = 1;
 
-    int max_bank_padding = 16;
+    int max_bank_padding = 9;
 
     cudaStream_t stream;
     CHECK_CUDA(cudaStreamCreate(&stream));
@@ -84,7 +84,7 @@ static inline void fft_tc_sm_val(vec2_t<T> *d_data, unsigned int B) {
     static constexpr unsigned int warm_up_runs = 0;
     static constexpr unsigned int warp_per_block = 1;
 
-    int max_bank_padding = 16;
+    int max_bank_padding = 9;
 
 
 
