@@ -101,8 +101,10 @@ __device__ void fill_reg_b(float b[], int stride_log2, int stride, int i_perm,
     int index2 = (j1/2)*(k+stride*(i1/2)) + stride * (i1 & 1) - stride * (j1 & 1);
     // auto w = W(j*(k+stride*i) + stride * ((threadIdx.x / 4) & 1),4*stride);
 
-    b[0] = W(index1,4*stride).x;
-    b[1] = W(index2,4*stride).x;
+    // b[0] = W(index1,4*stride).x;
+    // b[1] = W(index2,4*stride).x;
+    b[0] = W_ptr[(index1 & (4*stride-1)) * (16/stride)].x;
+    b[1] = W_ptr[(index2 & (4*stride-1))* (16/stride)].x;
 }
 
 template <unsigned int N>

@@ -37,7 +37,7 @@ float measure_execution_ms(Kernel &&kernel, const unsigned int warm_up_runs,
     CUDA_CHECK_AND_EXIT(cudaEventElapsedTime(&time, startEvent, stopEvent));
     CUDA_CHECK_AND_EXIT(cudaEventDestroy(startEvent));
     CUDA_CHECK_AND_EXIT(cudaEventDestroy(stopEvent));
-    return time;
+    return time / runs;
 }
 
 template <typename T>
