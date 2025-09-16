@@ -71,7 +71,6 @@ void benchmark_run(
 
     const double max_err =
         static_cast<double>(check_max_abs_err(baseline, h_custom, N));
-
     const PerfStat perf = benchmark(d_custom, B);
 
     stat::push(stat::RunStat{bench_type_cstr<T>(), N, radix, B,

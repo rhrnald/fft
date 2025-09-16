@@ -125,6 +125,7 @@ void fft_tc_sm_benchmark(float2 *h_input, half2 *h_input_half, float2 *baseline,
             return fft_tc_sm_perf<float, N, 8>(d_custom, B);
         },
         h_input, baseline, batch);
+        
     // fft_tc_sm_run<half, N, 8>(h_input_half, baseline, batch);
     // fft_tc_sm_run<half, N, 16>(h_input_half, baseline, batch);
     // fft_tc_sm_run<float, N, 8>(h_input, baseline, batch);
