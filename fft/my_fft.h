@@ -86,8 +86,8 @@ void my_fft_benchmark(float2 *h_input, half2 *h_input_half, float2 *baseline,
             d_data_half, d_W_64_half, inside_repeats);
     };
 
-    benchmark_run<float, N, 4>(kernel, h_input, baseline, batch);
-    benchmark_run<half, N, 4>(kernel_half, h_input_half, baseline, batch);
+    benchmark_run<float, N, 4>(kernel, h_input, baseline, batch, "ours");
+    benchmark_run<half, N, 4>(kernel_half, h_input_half, baseline, batch, "ours");
 
     CHECK_CUDA(cudaStreamDestroy(stream));
     CHECK_CUDA(cudaFree(d_W_64));

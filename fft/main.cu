@@ -7,12 +7,13 @@
 #include "fft_tc_sm_bench.h"
 #include "my_fft.h"
 
+
 void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch);
 
-int main() {
-    constexpr long long N = 64;
+template<long long N>
+int test() {
     constexpr long long batch = 65536;
-
+    
     float2 *h_input = (float2 *)malloc(sizeof(float2) * N * batch);
     half2 *h_input_half = (half2 *)malloc(sizeof(half2) * N * batch);
     float2 *h_answer = (float2 *)malloc(sizeof(float2) * N * batch);
@@ -27,26 +28,25 @@ int main() {
 
     baseline_fft(h_input, h_answer, N, batch);
 
-    float2 *d_input;
-    CHECK_CUDA(cudaMalloc(&d_input, sizeof(float2) * N * batch));
-    CHECK_CUDA(cudaMemcpy(d_input, h_input, sizeof(float2) * N * batch,
-                          cudaMemcpyHostToDevice));
-
     my_fft_benchmark<N>(h_input, h_input_half, h_answer, batch);
-    // stat::print_table();
-
     fft_tc_sm_benchmark<N>(h_input, h_input_half, h_answer, batch);
+    
     // stat::print_table();
 
-    // fft_tc_sm_benchmark<256>(h_input, h_input_half, answer, batch);
-
-    stat::set_title("FFT benchmark results");
-    stat::print_table();
-
-    CHECK_CUDA(cudaFree(d_input));
     free(h_input);
     free(h_input_half);
     free(h_answer);
+    return 0;
+}
 
+int main() {
+    test<64>();
+    // test<256>();
+    // test<1024>();
+    // test<4096>();
+
+    
+    stat::set_title("FFT benchmark results");
+    stat::print_table();
     return 0;
 }

@@ -1,10 +1,11 @@
 #pragma once
 #include <cstddef>
+#include <string>
 
 namespace stat {
 
 struct RunStat {
-    const char *type; // "half", "float", ...
+    std::string type; // "half", "float", ...
     unsigned N;       // FFT size
     unsigned radix;   // radix
     unsigned B;       // batch size

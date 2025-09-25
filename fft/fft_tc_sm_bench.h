@@ -125,8 +125,8 @@ void fft_tc_sm_benchmark(float2 *h_input, half2 *h_input_half, float2 *baseline,
                stream>>>(d_data_half, inside_repeats);
     };
 
-    benchmark_run<float, N, 8>(kernel, h_input, baseline, batch);
-    benchmark_run<half, N, 8>(kernel_half, h_input_half, baseline, batch);
+    benchmark_run<float, N, 8>(kernel, h_input, baseline, batch, "smem");
+    benchmark_run<half, N, 8>(kernel_half, h_input_half, baseline, batch, "smem");
 
     CHECK_CUDA(cudaStreamDestroy(stream));
 }

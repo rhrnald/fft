@@ -44,11 +44,11 @@ float measure_execution_ms(Kernel &&kernel, const unsigned int warm_up_runs,
 template <typename T>
 __host__ __device__ constexpr const char *bench_type_cstr() {
     if constexpr (std::is_same_v<T, half>)
-        return "half";
+        return "fp16";
     if constexpr (std::is_same_v<T, float>)
-        return "float";
+        return "fp32";
     if constexpr (std::is_same_v<T, double>)
-        return "double";
+        return "fp64";
     else
         return "unknown";
 }
@@ -89,8 +89,10 @@ static inline void benchmark_val(Kernel &&kernel, vec2_t<T> *d_data,
 
 template <typename T, unsigned int N, unsigned int radix, typename Kernel>
 void benchmark_run(Kernel &&kernel, vec2_t<T> *h_data, float2 *baseline,
-                   unsigned int B) {
+                   unsigned int B, std::string name="") {
     using T2 = vec2_t<T>;
+
+    // printf("running %s (type=%s, N=%d)\n", name.c_str(),bench_type_cstr<T>(), N);
 
     T2 *d_custom = nullptr;
     CHECK_CUDA(cudaMalloc(&d_custom, sizeof(T2) * N * B));
@@ -111,7 +113,8 @@ void benchmark_run(Kernel &&kernel, vec2_t<T> *h_data, float2 *baseline,
         static_cast<double>(check_max_abs_err(baseline, h_custom, N * B));
     const PerfStat perf = benchmark_perf<T, N>(kernel_wrapper, d_custom, B);
 
-    stat::push(stat::RunStat{bench_type_cstr<T>(), N, radix, B, max_err,
+    std::string label = name+"("+std::string(bench_type_cstr<T>())+")";
+    stat::push(stat::RunStat{label, N, radix, B, max_err,
                              perf.comp_ms, perf.comm_ms, perf.e2e_ms});
 
     CHECK_CUDA(cudaFree(d_custom));

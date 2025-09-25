@@ -26,7 +26,7 @@
     } while (0)
 
 void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch) {
-    printf("running baseline (type=float, N=%d, batch=%d)\n", N, batch);
+    printf("running cufft (type=float, N=%d, batch=%d)\n", N, batch);
     static constexpr unsigned int kernel_runs = 1;
     static constexpr unsigned int warm_up_runs = 1;
 
@@ -55,7 +55,7 @@ void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch) {
                cudaMemcpyDeviceToHost);
 
     stat::push(
-        stat::RunStat{/*type*/ "baseline", // 자유롭게 "cufft" 등으로 바꿔도 됨
+        stat::RunStat{/*type*/ "cufft", // 자유롭게 "cufft" 등으로 바꿔도 됨
                       /*N*/ static_cast<unsigned>(N),
                       /*radix*/ 0, // baseline이라 없음
                       /*B*/ static_cast<unsigned>(batch),

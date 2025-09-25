@@ -24,7 +24,7 @@ void print_header() {
 void print_row(const stat::RunStat &s) {
     std::printf(
         "%-10s %5u %5u %9u | %13.6g | %10.5f ms | %10.5f ms | %10.5f ms\n",
-        s.type, s.N, s.radix, s.B, s.max_abs_err, s.comp_ms, s.comm_ms,
+        s.type.c_str(), s.N, s.radix, s.B, s.max_abs_err, s.comp_ms, s.comm_ms,
         s.e2e_ms);
 }
 } // unnamed namespace
