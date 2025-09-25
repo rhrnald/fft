@@ -43,26 +43,26 @@ void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch) {
     cufftPlan1d(&plan, N, CUFFT_C2C, batch);
 
     auto kernel = [&](unsigned int inside_repeats) {
-        cufftExecC2C(plan, (cufftComplex *)d_input,
-                     (cufftComplex *)d_output, CUFFT_FORWARD);
+        cufftExecC2C(plan, (cufftComplex *)d_input, (cufftComplex *)d_output,
+                     CUFFT_FORWARD);
         // assert("4096 half is not supported" && false);
     };
 
-    double elapsedTime = measure_execution_ms(kernel, warm_up_runs, kernel_runs, 0);
+    double elapsedTime =
+        measure_execution_ms(kernel, warm_up_runs, kernel_runs, 0);
 
     cudaMemcpy(h_output, d_output, sizeof(float2) * N * batch,
                cudaMemcpyDeviceToHost);
 
-    stat::push(stat::RunStat{
-        /*type*/ "baseline", // 자유롭게 "cufft" 등으로 바꿔도 됨
-        /*N*/ static_cast<unsigned>(N),
-        /*radix*/ 0, // baseline이라 없음
-        /*B*/ static_cast<unsigned>(batch),
-        /*max_err*/ 0.0,
-        /*comp_ms*/ 0.0,
-        /*comm_ms*/ 0.0,
-        /*e2e_ms*/ elapsedTime
-    });
+    stat::push(
+        stat::RunStat{/*type*/ "baseline", // 자유롭게 "cufft" 등으로 바꿔도 됨
+                      /*N*/ static_cast<unsigned>(N),
+                      /*radix*/ 0, // baseline이라 없음
+                      /*B*/ static_cast<unsigned>(batch),
+                      /*max_err*/ 0.0,
+                      /*comp_ms*/ 0.0,
+                      /*comm_ms*/ 0.0,
+                      /*e2e_ms*/ elapsedTime});
 
     cudaFree(d_input);
     cudaFree(d_output);

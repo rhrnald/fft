@@ -47,7 +47,10 @@ inline constexpr unsigned LOG2P_builtin = [] {
     return __builtin_ctz(N); // pow2에서 log2(N)과 동일
 }();
 
-template <class T> using vec2_t = typename std::conditional_t<std::is_same_v<std::remove_cv_t<T>, float>, float2, half2>;
+template <class T>
+using vec2_t =
+    typename std::conditional_t<std::is_same_v<std::remove_cv_t<T>, float>,
+                                float2, half2>;
 
 template <int r, int N>
 __device__ __forceinline__ int reverse_bit_groups(int x) {
@@ -70,15 +73,11 @@ __device__ __forceinline__ float2 W(int index, int N) {
 }
 
 template <typename T>
-__device__ __forceinline__
-vec2_t<T> cmul(vec2_t<T> a, float2 w);
+__device__ __forceinline__ vec2_t<T> cmul(vec2_t<T> a, float2 w);
 
 // float 버전
-template <>
-__device__ __forceinline__
-float2 cmul<float>(float2 a, float2 w) {
-    return make_float2(a.x * w.x - a.y * w.y,
-                       a.y * w.x + a.x * w.y);
+template <> __device__ __forceinline__ float2 cmul<float>(float2 a, float2 w) {
+    return make_float2(a.x * w.x - a.y * w.y, a.y * w.x + a.x * w.y);
 }
 
 // float2용 연산자
@@ -90,9 +89,7 @@ __device__ __forceinline__ float2 operator-(float2 a, float2 b) {
 }
 
 // half 버전
-template <>
-__device__ __forceinline__
-half2 cmul<half>(half2 a, float2 w) {
+template <> __device__ __forceinline__ half2 cmul<half>(half2 a, float2 w) {
     // half2 -> float2
     float ax = __half2float(__low2half(a));
     float ay = __half2float(__high2half(a));

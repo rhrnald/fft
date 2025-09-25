@@ -17,12 +17,15 @@ void print_header() {
     }
     std::printf("%-10s %5s %5s %9s | %13s | %13s | %13s | %13s\n", "type", "N",
                 "radix", "B", "max_err", "comp_ms", "comm_ms", "e2e_ms");
-    std::printf("---------- ----- ----- --------- | ------------- | ------------- | ------------- | -------------\n");
+    std::printf("---------- ----- ----- --------- | ------------- | "
+                "------------- | ------------- | -------------\n");
 }
 
 void print_row(const stat::RunStat &s) {
-    std::printf("%-10s %5u %5u %9u | %13.6g | %10.5f ms | %10.5f ms | %10.5f ms\n", s.type,
-                s.N, s.radix, s.B, s.max_abs_err, s.comp_ms, s.comm_ms, s.e2e_ms);
+    std::printf(
+        "%-10s %5u %5u %9u | %13.6g | %10.5f ms | %10.5f ms | %10.5f ms\n",
+        s.type, s.N, s.radix, s.B, s.max_abs_err, s.comp_ms, s.comm_ms,
+        s.e2e_ms);
 }
 } // unnamed namespace
 
@@ -55,7 +58,8 @@ void print_csv(const char *path) {
     ofs << "type,N,radix,B,max_err,comp_ms,e2e_ms\n";
     for (const auto &s : g_stats) {
         ofs << s.type << ',' << s.N << ',' << s.radix << ',' << s.B << ','
-            << s.max_abs_err << ',' << s.comp_ms << ',' << s.e2e_ms << ',' << s.comm_ms << '\n';
+            << s.max_abs_err << ',' << s.comp_ms << ',' << s.e2e_ms << ','
+            << s.comm_ms << '\n';
     }
 }
 

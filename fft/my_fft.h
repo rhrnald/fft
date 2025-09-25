@@ -7,8 +7,8 @@
 #include <iostream>
 #include <stdio.h>
 
-#include "utils.h"
 #include "helper.h"
+#include "utils.h"
 
 #define CHECK_CUDA(call)                                                       \
     do {                                                                       \
@@ -36,8 +36,8 @@ fft_kernel_radix64_batch16(cuFloatComplex *d_data,
                            unsigned int repeat);
 __global__ void
 fft_kernel_radix64_batch16_branch(cuFloatComplex *d_data,
-                           const cuFloatComplex *__restrict__ W_64,
-                           unsigned int repeat);
+                                  const cuFloatComplex *__restrict__ W_64,
+                                  unsigned int repeat);
 __global__ void fft_kernel_radix64_batch16_half(half2 *d_data,
                                                 const half2 *__restrict__ W_64,
                                                 unsigned int repeat);
@@ -46,7 +46,7 @@ __global__ void fft_kernel_radix4096_batch1(cuFloatComplex *d_data,
 
 template <unsigned int N>
 void my_fft_benchmark(float2 *h_input, half2 *h_input_half, float2 *baseline,
-                         int batch) {
+                      int batch) {
     cudaStream_t stream;
     CHECK_CUDA(cudaStreamCreate(&stream));
 
@@ -67,16 +67,22 @@ void my_fft_benchmark(float2 *h_input, half2 *h_input_half, float2 *baseline,
 
     CHECK_CUDA(cudaMalloc(&d_W_64, 64 * sizeof(float2)));
     CHECK_CUDA(cudaMalloc(&d_W_64_half, 64 * sizeof(half2)));
-    CHECK_CUDA(cudaMemcpy(d_W_64, h_W_64, 64 * sizeof(float2), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_W_64_half, h_W_64_half, 64 * sizeof(half2), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_W_64, h_W_64, 64 * sizeof(float2),
+                          cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_W_64_half, h_W_64_half, 64 * sizeof(half2),
+                          cudaMemcpyHostToDevice));
 
-    auto kernel = [d_W_64, batch, stream](float2 *d_data, unsigned int inside_repeats) {
-        fft_kernel_radix64_batch16<<<batch / 16, 32, 32 * 2 * (32/2 + 1) * sizeof(float2), stream>>>(
+    auto kernel = [d_W_64, batch, stream](float2 *d_data,
+                                          unsigned int inside_repeats) {
+        fft_kernel_radix64_batch16<<<
+            batch / 16, 32, 32 * 2 * (32 / 2 + 1) * sizeof(float2), stream>>>(
             d_data, d_W_64, inside_repeats);
     };
 
-    auto kernel_half = [d_W_64_half, batch, stream](half2 *d_data_half, unsigned int inside_repeats) {
-        fft_kernel_radix64_batch16_half<<<batch / 16, 32, 32 * 2 * (32/2 + 1) * sizeof(half2), stream>>>(
+    auto kernel_half = [d_W_64_half, batch, stream](
+                           half2 *d_data_half, unsigned int inside_repeats) {
+        fft_kernel_radix64_batch16_half<<<
+            batch / 16, 32, 32 * 2 * (32 / 2 + 1) * sizeof(half2), stream>>>(
             d_data_half, d_W_64_half, inside_repeats);
     };
 

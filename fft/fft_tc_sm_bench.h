@@ -29,8 +29,8 @@
 //         [&](cudaStream_t s) {
 //             kernel_fft_tc_sm<T, N, radix, false>
 //                 <<<B / (16 * warp_per_block), dim3(32, warp_per_block),
-//                    16 * (N + max_bank_padding) * sizeof(T) * 2 * warp_per_block,
-//                    s>>>(d_data, inside_repeats);
+//                    16 * (N + max_bank_padding) * sizeof(T) * 2 *
+//                    warp_per_block, s>>>(d_data, inside_repeats);
 //         },
 //         warm_up_runs, kernel_runs, stream);
 //     CHECK_CUDA(cudaGetLastError());
@@ -40,22 +40,23 @@
 //         [&](cudaStream_t s) {
 //             kernel_fft_tc_sm<T, N, radix, false>
 //                 <<<B / (16 * warp_per_block), dim3(32, warp_per_block),
-//                    16 * (N + max_bank_padding) * sizeof(T) * 2 * warp_per_block,
-//                    s>>>(d_data, 2 * inside_repeats);
+//                    16 * (N + max_bank_padding) * sizeof(T) * 2 *
+//                    warp_per_block, s>>>(d_data, 2 * inside_repeats);
 //         },
 //         warm_up_runs, kernel_runs, stream);
 //     CHECK_CUDA(cudaGetLastError());
 //     CHECK_CUDA(cudaDeviceSynchronize());
 
-//     const double comp_ms = (t_2R - t_R) / static_cast<double>(inside_repeats);
+//     const double comp_ms = (t_2R - t_R) /
+//     static_cast<double>(inside_repeats);
 
 //     // end-to-end(런치 오버헤드 포함, 반복 1회)
 //     double e2e_ms = measure_execution_ms(
 //         [&](cudaStream_t s) {
 //             kernel_fft_tc_sm<T, N, radix, false>
 //                 <<<B / (16 * warp_per_block), dim3(32, warp_per_block),
-//                    16 * (N + max_bank_padding) * sizeof(T) * 2 * warp_per_block,
-//                    s>>>(d_data, 1);
+//                    16 * (N + max_bank_padding) * sizeof(T) * 2 *
+//                    warp_per_block, s>>>(d_data, 1);
 //         },
 //         warm_up_runs, kernel_runs, stream);
 //     CHECK_CUDA(cudaGetLastError());
@@ -65,13 +66,12 @@
 //         [&](cudaStream_t s) {
 //             kernel_fft_tc_sm<T, N, radix, false>
 //                 <<<B / (16 * warp_per_block), dim3(32, warp_per_block),
-//                     16 * (N + max_bank_padding) * sizeof(T) * 2 * warp_per_block,
-//                     s>>>(d_data, 0);
+//                     16 * (N + max_bank_padding) * sizeof(T) * 2 *
+//                     warp_per_block, s>>>(d_data, 0);
 //         },
 //         warm_up_runs, kernel_runs, stream);
 //     CHECK_CUDA(cudaGetLastError());
 //     CHECK_CUDA(cudaDeviceSynchronize());
-
 
 //     CHECK_CUDA(cudaStreamDestroy(stream));
 //     return {comp_ms, e2e_ms, comm_ms};
@@ -86,8 +86,6 @@
 
 //     int max_bank_padding = 9;
 
-
-
 //     cudaStream_t stream;
 //     CHECK_CUDA(cudaStreamCreate(&stream));
 
@@ -95,8 +93,8 @@
 //         [&](cudaStream_t s) {
 //             kernel_fft_tc_sm<T, N, radix, false>
 //                 <<<B / (16 * warp_per_block), dim3(32, warp_per_block),
-//                    16 * (N + max_bank_padding) * sizeof(T) * 2 * warp_per_block,
-//                    s>>>(d_data, inside_repeats);
+//                    16 * (N + max_bank_padding) * sizeof(T) * 2 *
+//                    warp_per_block, s>>>(d_data, inside_repeats);
 //         },
 //         warm_up_runs, kernel_runs, stream);
 //     CHECK_CUDA(cudaGetLastError());
@@ -114,16 +112,17 @@ void fft_tc_sm_benchmark(float2 *h_input, half2 *h_input_half, float2 *baseline,
     CHECK_CUDA(cudaStreamCreate(&stream));
     auto kernel = [batch, stream](float2 *d_data, unsigned int inside_repeats) {
         kernel_fft_tc_sm<float, N, 8, false>
-                <<<batch / (16 * warp_per_block), dim3(32, warp_per_block),
-                    16 * (N + max_bank_padding) * sizeof(float2) * warp_per_block,
-                    stream>>>(d_data, inside_repeats);
+            <<<batch / (16 * warp_per_block), dim3(32, warp_per_block),
+               16 * (N + max_bank_padding) * sizeof(float2) * warp_per_block,
+               stream>>>(d_data, inside_repeats);
     };
 
-    auto kernel_half = [batch, stream](half2 *d_data_half, unsigned int inside_repeats) {
+    auto kernel_half = [batch, stream](half2 *d_data_half,
+                                       unsigned int inside_repeats) {
         kernel_fft_tc_sm<half, N, 8, false>
-                <<<batch / (16 * warp_per_block), dim3(32, warp_per_block),
-                    16 * (N + max_bank_padding) * sizeof(half2) * warp_per_block,
-                    stream>>>(d_data_half, inside_repeats);
+            <<<batch / (16 * warp_per_block), dim3(32, warp_per_block),
+               16 * (N + max_bank_padding) * sizeof(half2) * warp_per_block,
+               stream>>>(d_data_half, inside_repeats);
     };
 
     benchmark_run<float, N, 8>(kernel, h_input, baseline, batch);
