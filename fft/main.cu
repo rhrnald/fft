@@ -46,5 +46,11 @@ int main() {
     
     stat::set_title("FFT benchmark results");
     stat::print_table();
+
+    CHECK_CUDA(cudaFree(d_input));
+    free(h_input);
+    free(h_input_half);
+    free(h_answer);
+
     return 0;
 }

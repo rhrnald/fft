@@ -27,7 +27,7 @@
 
 void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch) {
     printf("running baseline (type=float, N=%d, batch=%d)\n", N, batch);
-    static constexpr unsigned int kernel_runs = 10;
+    static constexpr unsigned int kernel_runs = 1;
     static constexpr unsigned int warm_up_runs = 1;
 
     cudaStream_t stream;
@@ -42,13 +42,13 @@ void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch) {
     cufftHandle plan;
     cufftPlan1d(&plan, N, CUFFT_C2C, batch);
 
-    double elapsedTime = measure_execution_ms(
-        [&](cudaStream_t stream) {
-            cufftExecC2C(plan, (cufftComplex *)d_input,
-                         (cufftComplex *)d_output, CUFFT_FORWARD);
-            // assert("4096 half is not supported" && false);
-        },
-        warm_up_runs, kernel_runs, stream);
+    auto kernel = [&](unsigned int inside_repeats) {
+        cufftExecC2C(plan, (cufftComplex *)d_input,
+                     (cufftComplex *)d_output, CUFFT_FORWARD);
+        // assert("4096 half is not supported" && false);
+    };
+
+    double elapsedTime = measure_execution_ms(kernel, warm_up_runs, kernel_runs, 0);
 
     cudaMemcpy(h_output, d_output, sizeof(float2) * N * batch,
                cudaMemcpyDeviceToHost);
