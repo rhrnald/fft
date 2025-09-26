@@ -644,7 +644,7 @@ __device__ void fft_kernel_r64_b16_half(half2 *reg,
             // b = [ w^ i ( k + Nj) ] ^ T
             int j_perm;
             if (stride >= 4)
-                j_perm = (j / (stride / 4)) % RADIX_DEVICE_CONST;
+                j_perm = ((j / (stride / 4)) / 2 * 2) % RADIX_DEVICE_CONST;
             else
                 j_perm = 0;
 
