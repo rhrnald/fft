@@ -22,8 +22,11 @@ __device__ __forceinline__ void fill_reg_b(float b[], int stride_log2, int strid
     j1^=j_perm;
     int index1 = j0*(k+stride*i) + stride * ((threadIdx.x / 16) & 1) - stride * ((threadIdx.x / 2) & 1);
     int index2 = j1*(k+stride*i) + stride * ((threadIdx.x / 16) & 1) - stride * ((threadIdx.x / 2) & 1);
-    b[0] = W_ptr[(index1 & (4*stride-1)) * (16/stride)];
-    b[1] = W_ptr[(index2 & (4*stride-1))* (16/stride)];
+    // b[0] = W_ptr[(index1 & (4*stride-1)) * (16/stride)];
+    // b[1] = W_ptr[(index2 & (4*stride-1))* (16/stride)];
+
+    b[0] = W(index1,4*stride).x;
+    b[1] = W(index2,4*stride).x;
 }
 
 template <typename T>
@@ -150,7 +153,7 @@ void body(vec2_t<float>* __restrict__ s_in,
     // Registers for data
     // cuFloatComplex reg[ept];
 
-    extern __shared__ __align__(sizeof(float4)) cuFloatComplex s_data[];
+    // extern __shared__ __align__(sizeof(float4)) cuFloatComplex s_data[];
 
     int laneid = threadIdx.x;
     int block_id = blockIdx.x;
@@ -158,21 +161,21 @@ void body(vec2_t<float>* __restrict__ s_in,
     float reg[ept * 2];
     for (int i = 0; i < ept / 2; i++) {
         if ((laneid % 4) < 2) {
-            reg[2 * i] = s_in[laneid / 4 * N + i * 4 + (laneid % 2) * 2].x;
+            reg[2 * i] = s_in[laneid / 4 * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2)].x;
             reg[2 * i + 1] =
-                s_in[laneid / 4 * N + i * 4 + (laneid % 2) * 2 + 1].x;
+                s_in[laneid / 4 * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1)].x;
             reg[2 * i + ept] =
-                s_in[(laneid / 4 + 8) * N + i * 4 + (laneid % 2) * 2].x;
+                s_in[(laneid / 4 + 8) * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2)].x;
             reg[2 * i + ept + 1] =
-                s_in[(laneid / 4 + 8) * N + i * 4 + (laneid % 2) * 2 + 1].x;
+                s_in[(laneid / 4 + 8) * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1)].x;
         } else {
-            reg[2 * i] = s_in[laneid / 4 * N + i * 4 + (laneid % 2) * 2].y;
+            reg[2 * i] = s_in[laneid / 4 * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2)].y;
             reg[2 * i + 1] =
-                s_in[laneid / 4 * N + i * 4 + (laneid % 2) * 2 + 1].y;
+                s_in[laneid / 4 * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1)].y;
             reg[2 * i + ept] =
-                s_in[(laneid / 4 + 8) * N + i * 4 + (laneid % 2) * 2].y;
+                s_in[(laneid / 4 + 8) * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2)].y;
             reg[2 * i + ept + 1] =
-                s_in[(laneid / 4 + 8) * N + i * 4 + (laneid % 2) * 2 + 1].y;
+                s_in[(laneid / 4 + 8) * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1)].y;
         }
     }
 

@@ -28,29 +28,30 @@ void ThunderFFT_kernel_shared(vec2_t<T>* __restrict__ s_in,
 // Global kernels (implemented)
 // ===================================
 
-template <typename T, unsigned N, unsigned batch>
+template <typename T, unsigned N, unsigned batch_per_block>
 static __global__ void ThunderFFT_kernel(
     vec2_t<T>*       d_input,
     vec2_t<T>*       d_output,
     const T*         __restrict__ dW) {
-    extern __shared__ unsigned char smem_raw[];
-    vec2_t<T>* s_in  = reinterpret_cast<vec2_t<T>*>(smem_raw);
-    vec2_t<T>* s_out = s_in + N;
+    extern __shared__ vec2_t<T> smem[];
+    vec2_t<T>* s_in  = smem;
+    vec2_t<T>* s_out = smem + N * batch_per_block;
+
 
     const unsigned b = blockIdx.x;
 
     // gmem -> smem
-    for (unsigned i = threadIdx.x; i < N * batch; i += blockDim.x) {
-        s_in[i] = d_input[static_cast<size_t>(b) * N * batch + i];
+    for (unsigned i = threadIdx.x; i < N * batch_per_block; i += blockDim.x) {
+        s_in[i] = d_input[b * N * batch_per_block + i];
     }
     __syncthreads();
 
     // Shared compute
-    ThunderFFT_kernel_shared<T, N, batch>(s_in, s_out, dW);
+    ThunderFFT_kernel_shared<T, N, batch_per_block>(s_in, s_out, dW);
 
     // smem -> gmem
-    for (unsigned i = threadIdx.x; i < N * batch; i += blockDim.x) {
-        d_output[static_cast<size_t>(b) * N * batch + i] = s_out[i];
+    for (unsigned i = threadIdx.x; i < N * batch_per_block; i += blockDim.x) {
+        d_output[b * N * batch_per_block + i] = s_out[i];
     }
 }
 
@@ -160,7 +161,7 @@ inline void ThunderFFT(vec2_t<T>* d_input,
     const dim3 block(threads_per_warp);
 
     
-    const size_t shmem_bytes = sizeof(vec2_t<T>) * N * batch_per_block;
+    const size_t shmem_bytes = 2 * sizeof(vec2_t<T>) * N * batch_per_block;
 
     detail::ThunderFFT_kernel<T, N, batch_per_block><<<grid, block, shmem_bytes, stream>>>(
         d_input, d_output, dW

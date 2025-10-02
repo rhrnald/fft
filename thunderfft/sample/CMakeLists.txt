@@ -4,7 +4,7 @@ add_executable(thff_sample
 )
 
 # Link header-only library (exports include dirs + cudart)
-target_link_libraries(thff_sample PRIVATE thunderfft)
+target_link_libraries(thff_sample PRIVATE thunderfft CUDA::cudart CUDA::cufft)
 
 # Optional: common flags
 target_compile_options(thff_sample PRIVATE
