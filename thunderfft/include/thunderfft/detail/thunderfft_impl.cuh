@@ -9,8 +9,9 @@
 
 #include "utils.h"
 
-
+#include "thunderfft/detail/unit_kernel_fp32.cuh"
 #include "thunderfft/detail/shared_kernel_fp32_n64_b16.cuh"
+#include "thunderfft/detail/shared_kernel_fp32_n4096_b1.cuh"
 
 namespace thunderfft::detail {
 
@@ -162,6 +163,7 @@ inline void ThunderFFT(vec2_t<T>* d_input,
 
     
     const size_t shmem_bytes = 2 * sizeof(vec2_t<T>) * N * batch_per_block;
+    cudaFuncSetAttribute(detail::ThunderFFT_kernel<T, N, batch_per_block>, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_bytes);
 
     detail::ThunderFFT_kernel<T, N, batch_per_block><<<grid, block, shmem_bytes, stream>>>(
         d_input, d_output, dW

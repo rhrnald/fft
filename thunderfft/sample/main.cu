@@ -96,7 +96,7 @@ static double linf_rel(const float2* a, const float2* b, size_t n) {
 
 int main(int /*argc*/, char** /*argv*/) {
     // Compile-time N for ThunderFFT template
-    constexpr unsigned N = 64;
+    constexpr unsigned N = 4096;
 
     unsigned batch = 65536; // adjust as you like
     int device     = 0;

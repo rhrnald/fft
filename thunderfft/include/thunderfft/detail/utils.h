@@ -79,12 +79,17 @@ __device__ __forceinline__ float2 W(int index, int N) {
                        __sinf(-2 * PI * index / N));
 }
 
-template <typename T>
-__device__ __forceinline__ vec2_t<T> cmul(vec2_t<T> a, float2 w);
+// template <typename T>
+// __device__ __forceinline__ vec2_t<T> cmul(vec2_t<T> a, float2 w);
 
-// float 버전
-template <> __device__ __forceinline__ float2 cmul<float>(float2 a, float2 w) {
-    return make_float2(a.x * w.x - a.y * w.y, a.y * w.x + a.x * w.y);
+// // float 버전
+// template <> __device__ __forceinline__ float2 cmul<float>(float2 a, float2 w) {
+//     return make_float2(a.x * w.x - a.y * w.y, a.y * w.x + a.x * w.y);
+// }
+
+__device__ __forceinline__ float2 cmul(float2 a, float2 w) {
+    return make_float2(a.x * w.x - a.y * w.y,  // real
+                       a.y * w.x + a.x * w.y); // imag
 }
 
 // float2용 연산자
@@ -96,7 +101,7 @@ __device__ __forceinline__ float2 operator-(float2 a, float2 b) {
 }
 
 // half 버전
-template <> __device__ __forceinline__ half2 cmul<half>(half2 a, float2 w) {
+__device__ __forceinline__ half2 cmul(half2 a, float2 w) {
     // half2 -> float2
     float ax = __half2float(__low2half(a));
     float ay = __half2float(__high2half(a));
