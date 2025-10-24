@@ -17,7 +17,7 @@ template <long long N> int test() {
     float2 *h_output = (float2 *)malloc(sizeof(float2) * N * batch);
 
     for (int i = 0; i < N * batch; ++i) {
-        h_input[i].x = sinf(2 * M_PI * (i % N) / N);
+        h_input[i].x = sinf(2 * M_PI * (i % N) / N) / N;
         // h_input[i].x = i % N;
         h_input[i].y = 0.0f;
 
@@ -28,11 +28,12 @@ template <long long N> int test() {
 
     fft_tc_sm_benchmark<N>(h_input, h_input_half, h_output, batch);
     
-    thunderfft_benchmark<N>(h_input, h_input_half, h_output, batch);
+    thunderfft_benchmark<float, N>(h_input, h_output, batch);
+    // thunderfft_benchmark<half, N>(h_input_half, h_output, batch);
 
     free(h_input);
     free(h_input_half);
-    free(h_answer);
+    free(h_output);
     return 0;
 }
 

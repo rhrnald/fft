@@ -1,12 +1,4 @@
-namespace thunderfft::detail {
-// Primary template declaration (must be visible before specialization)
-template <typename T, unsigned N, unsigned BATCH>
-__device__ __forceinline__
-void ThunderFFT_kernel_shared(vec2_t<T>* __restrict__ s_in,
-                              vec2_t<T>* __restrict__ s_out,
-                              const T*   __restrict__ W_N);
 
-} // namespace thunderfft::detail
 
 // ---- Implementation helpers for this specific combo (can be in a nested ns) ----
 namespace thunderfft::detail::fp32_n4096_b1 {
