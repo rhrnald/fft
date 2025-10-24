@@ -1,18 +1,29 @@
-# Benchmark executable (add/adjust sources as you have them)
-add_executable(thff_bench
+# bench/CMakeLists.txt
+
+add_executable(benchmark
   ${CMAKE_CURRENT_SOURCE_DIR}/main.cu
-  # ${PROJECT_SOURCE_DIR}/bench/baseline_cufft.cu
-  # ${PROJECT_SOURCE_DIR}/bench/my_fft.cu
-  # ${PROJECT_SOURCE_DIR}/bench/stat.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/baseline/baseline_cufft.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/util/stat.cu
 )
 
-target_link_libraries(thff_bench PRIVATE
-  thunderfft        # header-only lib (includes cudart)
-  CUDA::cufft       # for cuFFT baseline, comment out if unused
+target_include_directories(benchmark PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/util
+  ${CMAKE_CURRENT_SOURCE_DIR}/baseline
 )
 
-target_compile_options(thff_bench PRIVATE
-  $<$<COMPILE_LANGUAGE:CUDA>:-O3>
+target_link_libraries(benchmark PRIVATE
+  thunderfft
+  CUDA::cudart
+  CUDA::cufft
+)
+
+set_target_properties(benchmark PROPERTIES
+  CUDA_SEPARABLE_COMPILATION ON
+)
+
+# 공통 최적화 옵션
+target_compile_options(benchmark PRIVATE
+  $<$<COMPILE_LANGUAGE:CUDA>:-O3 --use_fast_math>
   $<$<COMPILE_LANGUAGE:CXX>:-O3>
 )
-

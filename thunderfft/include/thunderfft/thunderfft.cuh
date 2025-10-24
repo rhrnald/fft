@@ -22,8 +22,6 @@ template <typename T> static T *preprocess_W(unsigned int N);
 //   - Batch policy by FFT length N:
 //       * N <= 512   : use shared_batch16 (16 signals per block)
 //       * N >= 1024  : use shared_batch1  (1 signal  per block)
-//   - Constraint (applies ONLY to this shared path):
-//       1024 <= N * batch <= 16384
 // --------------------------------------------
 
 template <typename T>
