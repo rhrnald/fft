@@ -1,6 +1,3 @@
-
-
-// ---- Implementation helpers for this specific combo (can be in a nested ns) ----
 namespace thunderfft::detail::fp32_n4096_b1 {
 __device__ __forceinline__
 void body(vec2_t<float>* __restrict__ s_in,

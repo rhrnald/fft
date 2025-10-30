@@ -1,4 +1,8 @@
 namespace thunderfft::detail::unit {
+
+__device__ __forceinline__ float W_cos(int index, int N) {
+    return __cosf(-2 * PI * index / N);
+}
 __device__ __forceinline__ void fill_reg_b(float b[], int stride_log2, int stride, int i_perm,
                            int j_perm, int k,
                            const float *__restrict__ W_ptr) {
@@ -13,8 +17,8 @@ __device__ __forceinline__ void fill_reg_b(float b[], int stride_log2, int strid
     // b[0] = W_ptr[(index1 & (4*stride-1)) * (16/stride)];
     // b[1] = W_ptr[(index2 & (4*stride-1))* (16/stride)];
 
-    b[0] = W(index1,4*stride).x;
-    b[1] = W(index2,4*stride).x;
+    b[0] = W_cos(index1,4*stride);
+    b[1] = W_cos(index2,4*stride);
 }
 
 template <typename T>
@@ -130,25 +134,35 @@ void smem2reg(float* __restrict__ reg,
     int block_id = blockIdx.x;
     int ept = 32; // N * batch / warp_size
 
-    for (int i = 0; i < ept / 2; i++) {
-        if ((laneid % 4) < 2) {
-            reg[2 * i] = s_0[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2)*stride].x;
-            reg[2 * i + 1] =
-                s_0[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1)*stride].x;
-            reg[2 * i + ept] =
-                s_1[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2)*stride].x;
-            reg[2 * i + ept + 1] =
-                s_1[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1)*stride].x;
-        } else {
-            reg[2 * i] = s_0[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2)*stride].y;
-            reg[2 * i + 1] =
-                s_0[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1)*stride].y;
-            reg[2 * i + ept] =
-                s_1[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2)*stride].y;
-            reg[2 * i + ept + 1] =
-                s_1[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1)*stride].y;
-        }
+    float *f_0 = (float*)(s_0);
+    float *f_1 = (float*)(s_1);
+    int b =  ((laneid>>1) & 1);
+    for (int i = 0; i < ept / 2; i++) { 
+        // reg[i] = f_0[laneid + 32*i];
+        // reg[i+ept/2] = f_1[laneid + 32*i];
+
+        // reg[2 * i] =
+        //     f_0[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2    ) * stride * 2 + b];
+        // reg[2 * i + 1] =
+        //     f_0[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1) * stride * 2 + b];
+        // reg[2 * i + ept] =
+        //     f_1[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2    ) * stride * 2 + b];
+        // reg[2 * i + ept + 1] =
+        //     f_1[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1) * stride * 2 + b];
+        reg[2 * i] =
+            f_0[(i * 4 + (laneid % 2) * 2    ) * stride * 2 + b];
+        reg[2 * i + 1] =
+            f_0[(i * 4 + (laneid % 2) * 2 + 1) * stride * 2 + b];
+        reg[2 * i + ept] =
+            f_1[(i * 4 + (laneid % 2) * 2    ) * stride * 2 + b];
+        reg[2 * i + ept + 1] =
+            f_1[(i * 4 + (laneid % 2) * 2 + 1) * stride * 2 + b];
     }
+//     if(blockIdx.x==0 && threadIdx.x==0){
+//         for(int i=0; i<ept; i++){
+//             printf("reg[%d]=%f\n", i, reg[i]);
+//         }
+//     }
 }
 
 __device__ __forceinline__
@@ -161,19 +175,28 @@ void reg2smem(float* __restrict__ reg,
     int block_id = blockIdx.x;
     int ept = 32; // N * batch / warp_size
 
+    float *f_0 = (float*)(s_0);
+    float *f_1 = (float*)(s_1);
+    int b =  ((laneid>>1) & 1);
+
+
     for (int i = 0; i < ept; i++) {
-        if ((laneid % 4) < 2) {
-            s_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * 32)*stride]
-                .x = reg[i];
-            s_1[(i / 2 + (i & 1) * 16 +
-                   (laneid % 2) * 32)*stride]
-                .x = reg[i + ept];
-        } else {
-            s_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * 32)*stride]
-                .y = reg[i];
-            s_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * 32)*stride]
-                .y = reg[i + ept];
-        }
+        // f_0[laneid + 32*i] = reg[i];
+        // f_1[laneid + 32*i] = reg[i+ept/2];
+        // if ((laneid % 4) < 2) {
+        //     s_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * 32)*stride]
+        //         .x = reg[i];
+        //     s_1[(i / 2 + (i & 1) * 16 +
+        //            (laneid % 2) * 32)*stride]
+        //         .x = reg[i + ept];
+        // } else {
+        //     s_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * 32)*stride]
+        //         .y = reg[i];
+        //     s_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * 32)*stride]
+        //         .y = reg[i + ept];
+        // }
+        f_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * 33)*stride * 2 + b] = reg[i];
+        f_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * 33)*stride * 2 + b] = reg[i + ept];
     }
 }
 

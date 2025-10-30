@@ -143,3 +143,33 @@ template <typename T> __device__ __forceinline__ void swap_inline(T &x, T &y) {
     x = y;
     y = tmp;
 }
+
+constexpr int pad_h(int N) {
+    switch (N) {
+        case 1:  return 1;
+        case 2:  return 1;
+        case 4:  return 1;
+        case 8:  return 1;
+        case 16: return 1;
+        case 32: return 1;
+        case 64: return 4;
+        case 128: return 1;
+        case 256: return 1;
+        default:  return -1; // power of two 아닌 경우
+    }
+}
+
+__host__ __device__ constexpr int pad(int N) {
+    switch (N) {
+        case 1:   return 0;
+        case 2:   return 1;
+        case 4:   return 2;
+        case 8:   return 3;
+        case 16:  return 4;
+        case 32:  return 5;
+        case 64:  return 2;
+        case 128: return 7;
+        case 256: return 8;
+        default:  return -1;  // not a power of two
+    }
+}

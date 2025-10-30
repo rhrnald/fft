@@ -10,6 +10,17 @@
 #include "utils.h"
 
 #include "thunderfft/detail/unit_kernel_fp32.cuh"
+
+namespace thunderfft::detail {
+// Primary template declaration (must be visible before specialization)
+template <typename T, unsigned N, unsigned BATCH>
+__device__ __forceinline__
+void ThunderFFT_kernel_shared(vec2_t<T>* __restrict__ s_in,
+                              vec2_t<T>* __restrict__ s_out,
+                              const T*   __restrict__ W_N);
+
+}
+
 #include "thunderfft/detail/shared_kernel_fp32_n64_b16.cuh"
 #include "thunderfft/detail/shared_kernel_fp32_n4096_b1.cuh"
 
@@ -35,24 +46,38 @@ static __global__ void ThunderFFT_kernel(
     vec2_t<T>*       d_output,
     const T*         __restrict__ dW) {
     extern __shared__ vec2_t<T> smem[];
+    constexpr int logN = LOG2P_builtin<N>;
     vec2_t<T>* s_in  = smem;
-    vec2_t<T>* s_out = smem + N * batch_per_block;
-
+    vec2_t<T>* s_out = smem + (N+pad(N)) * batch_per_block;
 
     const unsigned b = blockIdx.x;
 
     // gmem -> smem
-    for (unsigned i = threadIdx.x; i < N * batch_per_block; i += blockDim.x) {
-        s_in[i] = d_input[b * N * batch_per_block + i];
+    // for (unsigned i = threadIdx.x; i < N * batch_per_block; i += blockDim.x) {
+    //     s_in[i] = d_input[b * N * batch_per_block + i];
+    // }
+    for (unsigned i = 0; i < batch_per_block; i++) {
+        for(unsigned j=threadIdx.x; j<N; j+= blockDim.x) {
+            s_in[i * (N+pad(N))+ j] = d_input[b * N * batch_per_block + i * N + reverse_bit_groups<2,6>(j)];
+            // s_in[i * (N+pad)+ j] = d_input[b * N * batch_per_block + i * N + j];
+        }
     }
     __syncthreads();
 
     // Shared compute
     ThunderFFT_kernel_shared<T, N, batch_per_block>(s_in, s_out, dW);
+    __syncthreads();
 
     // smem -> gmem
-    for (unsigned i = threadIdx.x; i < N * batch_per_block; i += blockDim.x) {
-        d_output[b * N * batch_per_block + i] = s_out[i];
+    // for (unsigned i = threadIdx.x; i < N * batch_per_block; i += blockDim.x) {
+    //     d_output[b * N * batch_per_block + i] = s_out[i];
+    // }
+    __syncthreads();
+
+    for (unsigned i = 0; i < batch_per_block; i++) {
+        for(unsigned j=threadIdx.x; j<N; j+= blockDim.x) {
+            d_output[b * N * batch_per_block + i * N + j] = s_out[i * (N+pad(N)) + j];
+        }
     }
 }
 
@@ -162,7 +187,7 @@ inline void ThunderFFT(vec2_t<T>* d_input,
     const dim3 block(threads_per_warp);
 
     
-    const size_t shmem_bytes = 2 * sizeof(vec2_t<T>) * N * batch_per_block;
+    const size_t shmem_bytes = 2 * sizeof(vec2_t<T>) * (N+pad_h(N)) * batch_per_block;
     cudaFuncSetAttribute(detail::ThunderFFT_kernel<T, N, batch_per_block>, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_bytes);
 
     detail::ThunderFFT_kernel<T, N, batch_per_block><<<grid, block, shmem_bytes, stream>>>(
