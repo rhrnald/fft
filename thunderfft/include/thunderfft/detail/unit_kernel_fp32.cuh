@@ -3,22 +3,54 @@ namespace thunderfft::detail::unit {
 __device__ __forceinline__ float W_cos(int index, int N) {
     return __cosf(-2 * PI * index / N);
 }
+
+__device__ __forceinline__ int f(int x) {
+    return (x % 2)*4+(x/2);
+}
+
 __device__ __forceinline__ void fill_reg_b(float b[], int stride_log2, int stride, int i_perm,
                            int j_perm, int k,
-                           const float *__restrict__ W_ptr) {
-    int i = (threadIdx.x / 4 ) % 4; //col
-    int j0 = (threadIdx.x % 2) * 2; // row (2j, 2j+1)
-    int j1 = (threadIdx.x % 2) * 2 + 1;
-    i^=i_perm;
-    j0^=j_perm;
-    j1^=j_perm;
-    int index1 = j0*(k+stride*i) + stride * ((threadIdx.x / 16) & 1) - stride * ((threadIdx.x / 2) & 1);
-    int index2 = j1*(k+stride*i) + stride * ((threadIdx.x / 16) & 1) - stride * ((threadIdx.x / 2) & 1);
-    // b[0] = W_ptr[(index1 & (4*stride-1)) * (16/stride)];
-    // b[1] = W_ptr[(index2 & (4*stride-1))* (16/stride)];
+                           const float *__restrict__ W_ptr, int stage) {
+    int i0 = threadIdx.x / 4;       // col
+    int i1 = threadIdx.x / 4;       // col
+    int j0 = (threadIdx.x % 4) * 2; // row (2j, 2j+1)
+    int j1 = (threadIdx.x % 4) * 2 + 1;
+
+    if (stage == 0) {
+        j0=f(j0);
+        j1=f(j1);
+    }
+    if (stage == 2) {
+        i0=f(i0);
+        i1=f(i1);
+    }
+
+    i0 ^= i_perm;
+    i1 ^= i_perm;
+    j0 ^= j_perm;
+    j1 ^= j_perm;
+
+    // int i0 = 2*i + (threadIdx.x/4 &1);
+    // int i1 = 2*i + (threadIdx.x/4 &1);
+    // int j0 = 2*j;
+    // int j1 = 2*j + 1;
+
+    i0 = (i0 % 4) * 2 + i0 / 4;
+    i1 = (i1 % 4) * 2 + i1 / 4;
+
+    j0 = (j0 % 4) * 2 + j0 / 4;
+    j1 = (j1 % 4) * 2 + j1 / 4;
+
+    int index1 = (j0 / 2) * (k + stride * (i0 / 2)) + stride * (i0 & 1) -
+                    stride * (j0 & 1);
+    int index2 = (j1 / 2) * (k + stride * (i1 / 2)) + stride * (i1 & 1) -
+                    stride * (j1 & 1);
+    // auto w = W(j*(k+stride*i) + stride * ((threadIdx.x / 4) & 1),4*stride);
 
     b[0] = W_cos(index1,4*stride);
     b[1] = W_cos(index2,4*stride);
+    // b[0] = W_ptr[(index1 & (4 * stride - 1)) * (16 / stride)].x;
+    // b[1] = W_ptr[(index2 & (4 * stride - 1)) * (16 / stride)].x;
 }
 
 template <typename T>
@@ -98,7 +130,7 @@ __device__ void fft_kernel_r64_b16(float* reg, const float* w_4096)
             const int i_perm = ((j / stride) / 2 * 2) % radix;
             const int k      = j % stride;
 
-            fill_reg_b(reg_frag_b, i * 2, stride, i_perm, j_perm, k, w_4096);
+            fill_reg_b(reg_frag_b, i * 2, stride, i_perm, j_perm, k, w_4096, i);
 
             mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b, reg_frag_zero);
 
@@ -125,7 +157,7 @@ __device__ void fft_kernel_r64_b16(float* reg, const float* w_4096)
 }
 
 __device__ __forceinline__
-void smem2reg(float* __restrict__ reg,
+void smem2reg(float* __restrict__ tmp,
               const vec2_t<float>* __restrict__ s_0,
               const vec2_t<float>* __restrict__ s_1,
               int stride = 1)
@@ -133,30 +165,25 @@ void smem2reg(float* __restrict__ reg,
     int laneid = threadIdx.x;
     int block_id = blockIdx.x;
     int ept = 32; // N * batch / warp_size
+    float2 *reg = reinterpret_cast<float2*>(tmp);
 
-    float *f_0 = (float*)(s_0);
-    float *f_1 = (float*)(s_1);
     int b =  ((laneid>>1) & 1);
     for (int i = 0; i < ept / 2; i++) { 
         // reg[i] = f_0[laneid + 32*i];
         // reg[i+ept/2] = f_1[laneid + 32*i];
 
+        reg[i] =
+            s_0[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2    ) * stride];
+        reg[i + ept / 2] =
+            s_1[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2    ) * stride];
         // reg[2 * i] =
-        //     f_0[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2    ) * stride * 2 + b];
+        //     f_0[(i * 4 + (laneid % 2) * 2    ) * stride * 2 + b];
         // reg[2 * i + 1] =
-        //     f_0[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1) * stride * 2 + b];
+        //     f_0[(i * 4 + (laneid % 2) * 2 + 1) * stride * 2 + b];
         // reg[2 * i + ept] =
-        //     f_1[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2    ) * stride * 2 + b];
+        //     f_1[(i * 4 + (laneid % 2) * 2    ) * stride * 2 + b];
         // reg[2 * i + ept + 1] =
-        //     f_1[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1) * stride * 2 + b];
-        reg[2 * i] =
-            f_0[(i * 4 + (laneid % 2) * 2    ) * stride * 2 + b];
-        reg[2 * i + 1] =
-            f_0[(i * 4 + (laneid % 2) * 2 + 1) * stride * 2 + b];
-        reg[2 * i + ept] =
-            f_1[(i * 4 + (laneid % 2) * 2    ) * stride * 2 + b];
-        reg[2 * i + ept + 1] =
-            f_1[(i * 4 + (laneid % 2) * 2 + 1) * stride * 2 + b];
+        //     f_1[(i * 4 + (laneid % 2) * 2 + 1) * stride * 2 + b];
     }
 //     if(blockIdx.x==0 && threadIdx.x==0){
 //         for(int i=0; i<ept; i++){
@@ -166,7 +193,7 @@ void smem2reg(float* __restrict__ reg,
 }
 
 __device__ __forceinline__
-void reg2smem(float* __restrict__ reg,
+void reg2smem(float* __restrict__ tmp,
               vec2_t<float>* __restrict__ s_0,
               vec2_t<float>* __restrict__ s_1,
               int stride = 1)
@@ -174,13 +201,11 @@ void reg2smem(float* __restrict__ reg,
     int laneid = threadIdx.x;
     int block_id = blockIdx.x;
     int ept = 32; // N * batch / warp_size
-
-    float *f_0 = (float*)(s_0);
-    float *f_1 = (float*)(s_1);
+    float2 *reg = reinterpret_cast<float2*>(tmp);
     int b =  ((laneid>>1) & 1);
 
 
-    for (int i = 0; i < ept; i++) {
+    for (int i = 0; i < ept / 2; i++) {
         // f_0[laneid + 32*i] = reg[i];
         // f_1[laneid + 32*i] = reg[i+ept/2];
         // if ((laneid % 4) < 2) {
@@ -195,8 +220,8 @@ void reg2smem(float* __restrict__ reg,
         //     s_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * 32)*stride]
         //         .y = reg[i + ept];
         // }
-        f_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * (32/*+1*/))*stride * 2 + b] = reg[i];
-        f_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * (32/*+1*/))*stride * 2 + b] = reg[i + ept];
+        s_0[(i + (laneid % 4) * (16/*+1*/))*stride] = reg[i];
+        s_1[(i + (laneid % 4) * (16/*+1*/))*stride] = reg[i + ept/2];
     }
 }
 
