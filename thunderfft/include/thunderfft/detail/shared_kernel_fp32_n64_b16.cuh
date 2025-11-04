@@ -4,7 +4,7 @@ __device__ __forceinline__
 void ThunderFFT_kernel_shared<float, 64, 16>(vec2_t<float>* __restrict__ s_in,
                                              vec2_t<float>* __restrict__ s_out,
                                              const float*   __restrict__ W_N) {
-        constexpr int N = 64; // radix^iter
+    constexpr int N = 64; // radix^iter
     constexpr int batch = 16;
     constexpr int warp_size = 32;
     constexpr int ept = N * batch / warp_size; // element_per_thread

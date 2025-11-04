@@ -77,6 +77,8 @@ __device__ __forceinline__ int reverse_bit_groups(int x) {
 __device__ __forceinline__ float2 W(int index, int N) {
     return make_float2(__cosf(-2 * PI * index / N),
                        __sinf(-2 * PI * index / N));
+    // return make_float2(cos(-2 * PI * index / N),
+    //                    sin(-2 * PI * index / N));
 }
 
 // template <typename T>
@@ -146,30 +148,21 @@ template <typename T> __device__ __forceinline__ void swap_inline(T &x, T &y) {
 
 constexpr int pad_h(int N) {
     switch (N) {
-        case 1:  return 1;
-        case 2:  return 1;
-        case 4:  return 1;
-        case 8:  return 1;
-        case 16: return 1;
-        case 32: return 1;
-        case 64: return 4;
-        case 128: return 1;
-        case 256: return 1;
+        case 64: return 2;
+        case 256: return 8;
+        case 1024: return 32;
+        case 4096: return 128;
         default:  return -1; // power of two 아닌 경우
     }
 }
 
 __host__ __device__ constexpr int pad(int N) {
     switch (N) {
-        case 1:   return 0;
-        case 2:   return 1;
-        case 4:   return 2;
-        case 8:   return 3;
-        case 16:  return 4;
-        case 32:  return 5;
         case 64:  return 2;
-        case 128: return 7;
         case 256: return 8;
+        case 1024: return 2;
+        case 4096: return 2;
         default:  return -1;  // not a power of two
     }
 }
+

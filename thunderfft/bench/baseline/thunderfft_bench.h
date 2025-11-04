@@ -12,29 +12,400 @@ __global__ void ThunderFFT_kernel_ir(
     vec2_t<T>*       d_input,
     vec2_t<T>*       d_output,
     const T*         __restrict__ dW,
-    unsigned                  inside_repeats) {
+    unsigned                  inside_repeats);
 
-    extern __shared__ vec2_t<T> s_in[];
+template <>
+__global__ void ThunderFFT_kernel_ir<float,64,16>(
+    vec2_t<float>*       d_input,
+    vec2_t<float>*       d_output,
+    const float*         __restrict__ dW,
+    unsigned                  inside_repeats)  {
+    typedef float T;
+    constexpr unsigned N = 64;
+    constexpr unsigned batch_per_block = 16;
+    constexpr int warp_size = 32;
+    constexpr int ept = N * batch_per_block / warp_size; // element_per_thread
+
+    // int threadid = threadIdx.x * blockDim.y + threadIdx.y;
+    int laneid =  threadIdx.x; //% warp_size;
+    int blockid = blockIdx.x;
+
+
+    extern __shared__ vec2_t<float> s_in[];
     auto s_out=s_in + N * batch_per_block;
 
-    const unsigned b = blockIdx.x;
-
     // gmem -> smem (input)
-    for (unsigned i = threadIdx.x; i < N * batch_per_block; i += blockDim.x) {
-        s_in[i] = d_input[b * N * batch_per_block + i];
+   for (unsigned i = 0; i < batch_per_block; i++) {
+        for(unsigned j=threadIdx.x; j<N; j+= blockDim.x) {
+            s_in[i * (N+pad(N))+ j - (i&1) ] = d_input[blockid * N * batch_per_block + i * N + reverse_bit_groups<2,6>(j)];
+            // s_in[i * (N+pad)+ j] = d_input[b * N * batch_per_block + i * N + j];
+        }
     }
     __syncthreads();
 
     // repeat in shared memory
+    // for (unsigned r = 0; r < inside_repeats; ++r) {
+        float reg[ept * 2];
+
+        int b =  ((laneid>>1) & 1);
+        int pad_r = ((laneid/4)&1);
+
+        float *i_0 = (float*)(s_in+(laneid/4)*(N+pad(N)) - pad_r);
+        float *i_1 = (float*)(s_in+(laneid/4+8)*(N+pad(N)) - pad_r);
+
+        for (int i = 0; i < ept / 2; i++) {
+            reg[2 * i] =
+                i_0[(i * 4 + (laneid % 2) * 2    ) * 2 + b];
+            reg[2 * i + 1] =
+                i_0[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
+            reg[2 * i + ept] =
+                i_1[(i * 4 + (laneid % 2) * 2    ) * 2 + b];
+            reg[2 * i + ept + 1] =
+                i_1[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
+        }
+
     for (unsigned r = 0; r < inside_repeats; ++r) {
-        thunderfft::detail::ThunderFFT_kernel_shared<T, N, batch_per_block>(s_in, s_out, dW);
+        thunderfft::detail::unit::fft_kernel_r64_b16(reg, dW);
+    }
+        float *o_0 = (float*)(s_out+(laneid/4)*(N+pad(N)));
+        float *o_1 = (float*)(s_out+(laneid/4+8)*(N+pad(N)));
+        for (int i = 0; i < ept; i++) {
+            o_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * 33) * 2 + b] = reg[i];
+            o_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * 33) * 2 + b] = reg[i + ept];
+        }
+        __syncthreads();
+    // }
+
+    for (unsigned i = 0; i < batch_per_block; i++) {
+        for(unsigned j=threadIdx.x; j<N; j+= blockDim.x) {
+            d_output[blockid * N * batch_per_block + i * N + j] = s_out[i * (N+pad(N)) + j + (j/32)];
+        }
+    }
+}
+
+template <>
+__global__ void ThunderFFT_kernel_ir<float,256,16>(
+    vec2_t<float>*       d_input,
+    vec2_t<float>*       d_output,
+    const float*         __restrict__ dW,
+    unsigned                  inside_repeats)  {
+    typedef float T;
+    constexpr unsigned N = 256;
+    constexpr unsigned batch_per_block = 16;
+    constexpr int warp_size = 32;
+    constexpr int ept = N * batch_per_block / warp_size; // element_per_thread
+
+    int laneid =  threadIdx.x;
+    int warpid = threadIdx.y;
+    int threadid = warpid * warp_size + laneid;
+    int blockid = blockIdx.x;
+
+
+    extern __shared__ vec2_t<float> s_in[];
+    auto s_out=s_in + (N+pad(N)) * batch_per_block;
+
+    // gmem -> smem (input)
+   for (int i = 0; i < batch_per_block; i++) {
+        for(int j=laneid; j<64; j+=32) {
+            s_in[ (i * 4+ warpid) * (64+2) + j - (warpid&1) ] = d_input[blockid * N * batch_per_block + i * N + reverse_bit_groups<2,LOG2P_builtin<N>>(64*warpid+j)];
+        }
+    }
+
+    float reg[ept * 2];
+    float2* reg2 = (reinterpret_cast<float2*>(reg));
+
+    int b =  ((laneid>>1) & 1);
+    int pad_r = ((laneid/4)&1);
+
+    float *i_0 = (float*)(s_in+(laneid/4 + warpid * 16) * (64+2) - pad_r);
+    float *i_1 = (float*)(s_in+(laneid/4+8 +  warpid * 16) * (64+2) - pad_r);
+
+    for (int i = 0; i < ept / 2; i++) {
+        reg[2 * i] =
+            i_0[(i * 4 + (laneid % 2) * 2    ) * 2 + b];
+        reg[2 * i + 1] =
+            i_0[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
+        reg[2 * i + ept] =
+            i_1[(i * 4 + (laneid % 2) * 2    ) * 2 + b];
+        reg[2 * i + ept + 1] =
+            i_1[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
+    }
+
+    __syncthreads();
+    for (int r = 0; r < inside_repeats; ++r) {
+    // repeat in shared memory
+
+        if(true) {
+
+
+        // for (unsigned r = 0; r < inside_repeats; ++r) {
+            thunderfft::detail::unit::fft_kernel_r64_b16(reg, dW);
+        // }
+            float *o_0 = (float*)(s_out+(laneid/4 + warpid * 16)*(64+2));
+            float *o_1 = (float*)(s_out+(laneid/4+8 + warpid * 16)*(64+2));
+            for (int i = 0; i < ept; i++) {
+                o_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * (32+1)) * 2 + b] = reg[i];
+                o_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * (32+1)) * 2 + b] = reg[i + ept];
+            }
+        }
+        __syncthreads();
+        if(true) {
+            for (int i = 0; i < 4; i++) {
+                const int batch = warpid * 4 + i;
+
+                for (int j = 0; j < 2; j++) {
+                    const int index = laneid + j * 32;   // 0..127 (for j=0..3) when 32-lane warp
+
+                    // keep the original stride pattern: +0, +64, +128, +192 (N must be >= 256)
+
+                    const int stride = (N + pad(N));
+                    const int base   = batch * stride;
+
+                    reg2[0 + 4 * (i*2+j)] = s_out[base + (index +   0)];
+                    reg2[1 + 4 * (i*2+j)] = s_out[base + (index +  64)];
+                    reg2[2 + 4 * (i*2+j)] = s_out[base + (index + 128)];
+                    reg2[3 + 4 * (i*2+j)] = s_out[base + (index + 192)];
+
+                    // very rough twiddle usage (same k for all four, just to make it run)
+                    const int k = (index % 64);  // your original code used (index % 64)
+                    const float2 w = W(k, 256);
+
+                    reg2[0 + 4 * (i*2+j)] = cmul(reg2[0 + 4 * (i*2+j)], w);
+                    reg2[1+ 4 * (i*2+j)] = cmul(reg2[1], w);
+                    reg2[2+ 4 * (i*2+j)] = cmul(reg2[2], w);
+                    reg2[3+ 4 * (i*2+j)] = cmul(reg2[3], w);
+
+                    // radix-4 DIF with middle (-i)
+                    float2 a = reg2[0+ 4 * (i*2+j)] + reg2[2+ 4 * (i*2+j)]; // x0 + x2
+                    float2 b = reg2[0+ 4 * (i*2+j)] - reg2[2+ 4 * (i*2+j)]; // x0 - x2
+                    float2 c = reg2[1+ 4 * (i*2+j)] + reg2[3+ 4 * (i*2+j)]; // x1 + x3
+                    float2 d = reg2[1+ 4 * (i*2+j)] - reg2[3+ 4 * (i*2+j)]; // x1 - x3
+
+                    d = make_float2(-d.y, d.x);        // center-stage rotation by -i
+
+                    reg2[0+ 4 * (i*2+j)] = a + c;             // y0
+                    reg2[1+ 4 * (i*2+j)] = b + d;             // y1
+                    reg2[2+ 4 * (i*2+j)] = a - c;             // y2
+                    reg2[3+ 4 * (i*2+j)] = b - d;             // y3
+
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < 4; i++) {
+        const int batch = warpid * 4 + i;
+
+        for (int j = 0; j < 2; j++) {
+            const int index = laneid + j * 32;   // 0..127 (for j=0..3) when 32-lane warp
+
+            // keep the original stride pattern: +0, +64, +128, +192 (N must be >= 256)
+
+            const int stride = (N + pad(N));
+            const int base   = batch * stride;
+            s_out[base + (index +   0)] = reg2[0+ 4 * (i*2+j)];
+            s_out[base + (index +  64)] = reg2[1+ 4 * (i*2+j)];
+            s_out[base + (index + 128)] = reg2[2+ 4 * (i*2+j)];
+            s_out[base + (index + 192)] = reg2[3+ 4 * (i*2+j)];
+        }
+    }
+
+    for (int i = 0; i < batch_per_block; i++) {
+        for(int j=threadid; j<N; j+= blockDim.x * blockDim.y) {
+            d_output[blockid * N * batch_per_block + i * N + j] = s_out[i * (N+pad(N)) + j /*+ (j/32)*/];
+        }
+    }
+}
+
+template <>
+__global__ void ThunderFFT_kernel_ir<float,4096,1>(
+    vec2_t<float>*       d_input,
+    vec2_t<float>*       d_output,
+    const float*         __restrict__ dW,
+    unsigned                  inside_repeats)  {
+        typedef float T;
+    constexpr unsigned N = 4096;
+    constexpr unsigned batch_per_block = 1;
+    constexpr int warp_size = 32;
+    constexpr int ept = N * batch_per_block / warp_size / 4; // element_per_thread
+
+    int laneid =  threadIdx.x;
+    int warpid = threadIdx.y;
+    int threadid = warpid * warp_size + laneid;
+    int blockid = blockIdx.x;
+
+
+    extern __shared__ vec2_t<float> s_in[];
+    auto s_out=s_in + (N) * batch_per_block;
+
+    // gmem -> smem (input)
+    for(int j=threadid; j<N; j+= blockDim.x * blockDim.y) {
+        // s_in[j] = d_input[blockid * N * batch_per_block + j];
+        s_in[j/64 * 66 + j % 64 - ((j/64)&1)] = d_input[blockid * N * batch_per_block + reverse_bit_groups<2,LOG2P_builtin<N>>(j)];
+    }
+    
+
+    float reg[ept * 2];
+
+    __syncthreads();
+
+    // #pragma unroll 1
+    // for (int r = 0; r < 100; ++r) {
+    // for (int r = 0; r < inside_repeats; ++r) {
+
+        int b =  ((laneid>>1) & 1);
+        int pad_r = ((laneid/4)&1);
+
+        float *i_0 = (float*)(s_in+((laneid/4) + warpid * 16)*66 - pad_r);
+        float *i_1 = (float*)(s_in+((laneid/4+8) + warpid*16)*66 - pad_r);
+
+
+    #pragma unroll 1
+    // for (int r = 0; r < 100; ++r) {
+    for (int r = 0; r < inside_repeats; ++r) {
+        thunderfft::detail::unit::fft_kernel_r64_b16(reg, dW);
+
+        // thunderfft::detail::unit::reg2smem(reg, s_out+((laneid/4) + warpid * 16)*64, s_out + ((laneid/4+8) + warpid*16)*64, 1);
+        for (int i = 0; i < ept / 2; i++) {
+            reg[2 * i] =
+                i_0[(i * 4 + (laneid % 2) * 2    ) * 2 + b];
+            reg[2 * i + 1] =
+                i_0[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
+            reg[2 * i + ept] =
+                i_1[(i * 4 + (laneid % 2) * 2    ) * 2 + b];
+            reg[2 * i + ept + 1] =
+                i_1[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
+        }
+        float *o_0 = (float*)(s_out+((laneid/4) + warpid * 16)*(66));
+        float *o_1 = (float*)(s_out+((laneid/4+8) + warpid*16)*(66));
+        for (int i = 0; i < ept; i++) {
+            o_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * 33) * 2 + b] = reg[i];
+            o_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * 33) * 2 + b] = reg[i + ept];
+        }
+        __syncthreads();
+
+        for(int i = 0 ; i < 16 ; i++) {
+            s_out[(16*warpid+i)*66 + laneid] = cmul(s_out[(16*warpid+i)*66 + laneid] , W((laneid) * reverse_bit_groups<2,6>(16*warpid+i), 4096));
+            s_out[(16*warpid+i)*66 + laneid+33] = cmul(s_out[(16*warpid+i)*66 + laneid+33] , W((laneid+32) * reverse_bit_groups<2,6>(16*warpid+i), 4096));
+        }
+
+        __syncthreads();
+
+        thunderfft::detail::unit::smem2reg(reg,  s_out+(laneid/4) + warpid * 16 + warpid/2, s_out+(laneid/4+8) + warpid * 16 + warpid/2, 66);
+        thunderfft::detail::unit::fft_kernel_r64_b16(reg, dW);
+        thunderfft::detail::unit::reg2smem(reg, s_out+(laneid/4) + warpid * 16, s_out + (laneid/4+8) + warpid * 16, 64);
+
         __syncthreads();
     }
 
-    for (unsigned i = threadIdx.x; i < N * batch_per_block; i += blockDim.x) {
-        d_output[b * N * batch_per_block + i] = s_out[i];
+    
+    __syncthreads();
+
+    for(int j=threadid; j<N; j+= blockDim.x * blockDim.y) {
+        d_output[blockid * N * batch_per_block + j] = s_out[j];
     }
 }
+
+// template <>
+// __global__ void ThunderFFT_kernel_ir<float,256,16>(
+//     vec2_t<float>*       d_input,
+//     vec2_t<float>*       d_output,
+//     const float*         __restrict__ dW,
+//     unsigned                  inside_repeats)  {
+//     typedef float T;
+//     constexpr unsigned N = 256;
+//     constexpr unsigned batch_per_block = 16;
+//     constexpr int warp_size = 32;
+//     constexpr int ept = N * batch_per_block / warp_size; // element_per_thread
+
+//     int laneid =  threadIdx.x;
+//     int warpid = threadIdx.y;
+//     int threadid = warpid * warp_size + laneid;
+//     int blockid = blockIdx.x;
+
+
+//     extern __shared__ vec2_t<float> s_in[];
+//     auto s_out=s_in + (N+pad(N)) * batch_per_block;
+
+//     // gmem -> smem (input)
+//    for (int i = 0; i < batch_per_block; i++) {
+//         for(int j=laneid; j<64; j+=32) {
+//             s_in[ (i * 4+ warpid) * (64+2) + j /*- (warpid&1)*/ ] = d_input[blockid * N * batch_per_block + i * N + reverse_bit_groups<2,LOG2P_builtin<N>>(64*warpid+j)];
+//         }
+//     }
+
+//     __syncthreads();
+//     for (int r = 0; r < inside_repeats; ++r) {
+//     // repeat in shared memory
+//         float reg[ept * 2];
+
+//         if(true) {
+//             int b =  ((laneid>>1) & 1);
+//             int pad_r = ((laneid/4)&1);
+
+//             float *i_0 = (float*)(s_in+(laneid/4 + warpid * 16) * (64+2) /*- pad_r*/);
+//             float *i_1 = (float*)(s_in+(laneid/4+8 +  warpid * 16) * (64+2) /*- pad_r*/);
+
+//             for (int i = 0; i < ept / 2; i++) {
+//                 reg[2 * i] =
+//                     i_0[(i * 4 + (laneid % 2) * 2    ) * 2 + b];
+//                 reg[2 * i + 1] =
+//                     i_0[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
+//                 reg[2 * i + ept] =
+//                     i_1[(i * 4 + (laneid % 2) * 2    ) * 2 + b];
+//                 reg[2 * i + ept + 1] =
+//                     i_1[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
+//             }
+
+//         // for (unsigned r = 0; r < inside_repeats; ++r) {
+//             thunderfft::detail::unit::fft_kernel_r64_b16(reg, dW);
+//         // }
+//             float *o_0 = (float*)(s_out+(laneid/4 + warpid * 16)*(64+2));
+//             float *o_1 = (float*)(s_out+(laneid/4+8 + warpid * 16)*(64+2));
+//             for (int i = 0; i < ept; i++) {
+//                 o_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * (32+1)) * 2 + b] = reg[i];
+//                 o_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * (32+1)) * 2 + b] = reg[i + ept];
+//             }
+//         }
+//         __syncthreads();
+//         if(true) {
+//             int b =  ((laneid>>1) & 1);
+//             int pad_r = ((laneid/4)&1);
+
+//             float *i_0 = (float*)(s_in+(laneid/4 + warpid * 16) * (64+2) /*- pad_r*/);
+//             float *i_1 = (float*)(s_in+(laneid/4+8 +  warpid * 16) * (64+2) /*- pad_r*/);
+
+//             for (int i = 0; i < ept / 2; i++) {
+//                 reg[2 * i] =
+//                     i_0[(i * 4 + (laneid % 2) * 2    ) * 2 + b];
+//                 reg[2 * i + 1] =
+//                     i_0[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
+//                 reg[2 * i + ept] =
+//                     i_1[(i * 4 + (laneid % 2) * 2    ) * 2 + b];
+//                 reg[2 * i + ept + 1] =
+//                     i_1[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
+//             }
+
+//         // for (unsigned r = 0; r < inside_repeats; ++r) {
+//             thunderfft::detail::unit::fft_kernel_r64_b16(reg, dW);
+//         // }
+//             float *o_0 = (float*)(s_out+(laneid/4 + warpid * 16)*(64+pad(64)));
+//             float *o_1 = (float*)(s_out+(laneid/4+8 + warpid * 16)*(64+pad(64)));
+//             for (int i = 0; i < ept; i++) {
+//                 o_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * (32+1)) * 2 + b] = reg[i];
+//                 o_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * (32+1)) * 2 + b] = reg[i + ept];
+//             }
+//         }
+//     }
+
+//     for (int i = 0; i < batch_per_block; i++) {
+//         for(int j=threadid; j<N; j+= blockDim.x * blockDim.y) {
+//             d_output[j] = s_out[i * (N+pad(N)) + j /*+ (j/32)*/];
+//             // d_output[blockid * N * batch_per_block + i * N + j] = s_out[i * (N+pad(N)) + j /*+ (j/32)*/];
+//         }
+//     }
+// }
+
 
 template <typename T, unsigned int N>
 void thunderfft_benchmark(vec2_t<T>* h_input, float2* baseline,
@@ -47,11 +418,15 @@ void thunderfft_benchmark(vec2_t<T>* h_input, float2* baseline,
 
     constexpr unsigned batch_per_block  = (N <= 512u ? 16u : 1u);
     constexpr unsigned threads_per_warp = 32;
+    constexpr unsigned warp_per_block =
+        (N == 64  || N == 1024) ? 1 :
+        (N == 256 || N == 4096) ? 4 :
+        -1;
 
     const dim3 grid ( batch  / batch_per_block );
-    const dim3 block( threads_per_warp );
+    const dim3 block( threads_per_warp, warp_per_block );
 
-    const size_t shmem_bytes = 2 * sizeof(T2) * N * batch_per_block;
+    const size_t shmem_bytes = 2 * sizeof(T2) * (N+pad_h(N)) * batch_per_block;
 
     T* dW;
     CHECK_CUDA(cudaFuncSetAttribute(
@@ -74,6 +449,6 @@ void thunderfft_benchmark(vec2_t<T>* h_input, float2* baseline,
     //     CHECK_CUDA(cudaGetLastError());
     // };
 
-    benchmark_run<T, N, 8>(kernel, h_input, baseline, batch, "thun");
+    benchmark_run<T, N, 4>(kernel, h_input, baseline, batch, "thun");
     CHECK_CUDA(cudaStreamDestroy(stream));
 }

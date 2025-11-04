@@ -195,8 +195,8 @@ void reg2smem(float* __restrict__ reg,
         //     s_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * 32)*stride]
         //         .y = reg[i + ept];
         // }
-        f_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * 33)*stride * 2 + b] = reg[i];
-        f_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * 33)*stride * 2 + b] = reg[i + ept];
+        f_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * (32/*+1*/))*stride * 2 + b] = reg[i];
+        f_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * (32/*+1*/))*stride * 2 + b] = reg[i + ept];
     }
 }
 

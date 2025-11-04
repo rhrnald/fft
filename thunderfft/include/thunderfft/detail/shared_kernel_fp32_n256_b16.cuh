@@ -1,25 +1,13 @@
-
-// ---- Implementation helpers for this specific combo (can be in a nested ns) ----
-namespace thunderfft::detail::fp32_n256_b16 {
-
-
+namespace thunderfft::detail {
+template <>
 __device__ __forceinline__
-void body(vec2_t<float>* __restrict__ s_in,
-          vec2_t<float>* __restrict__ s_out,
-          const float*   __restrict__ W_N) {
-            
-    // Tensor core shape
-    constexpr int m = 16;
-    constexpr int n = 8;
-    constexpr int k = 8;
-
-    constexpr int radix = k / 2; // = 4
-    constexpr int iter = 3;
-    constexpr int N = 64; // radix^iter
-    constexpr int batch = m;
+void ThunderFFT_kernel_shared<float, 256, 16>(vec2_t<float>* __restrict__ s_in,
+                                             vec2_t<float>* __restrict__ s_out,
+                                             const float*   __restrict__ W_N) {
+    constexpr int N = 256; 
+    constexpr int batch = 16;
     constexpr int warp_size = 32;
     constexpr int ept = N * batch / warp_size; // element_per_thread
-
     // Registers for data
     // cuFloatComplex reg[ept];
 
@@ -29,59 +17,33 @@ void body(vec2_t<float>* __restrict__ s_in,
     int block_id = blockIdx.x;
 
     float reg[ept * 2];
-    // for (int i = 0; i < ept / 2; i++) {
-    //     if ((laneid % 4) < 2) {
-    //         reg[2 * i] = s_in[laneid / 4 * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2)].x;
-    //         reg[2 * i + 1] =
-    //             s_in[laneid / 4 * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1)].x;
-    //         reg[2 * i + ept] =
-    //             s_in[(laneid / 4 + 8) * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2)].x;
-    //         reg[2 * i + ept + 1] =
-    //             s_in[(laneid / 4 + 8) * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1)].x;
-    //     } else {
-    //         reg[2 * i] = s_in[laneid / 4 * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2)].y;
-    //         reg[2 * i + 1] =
-    //             s_in[laneid / 4 * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1)].y;
-    //         reg[2 * i + ept] =
-    //             s_in[(laneid / 4 + 8) * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2)].y;
-    //         reg[2 * i + ept + 1] =
-    //             s_in[(laneid / 4 + 8) * N + reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2 + 1)].y;
-    //     }
-    // }
 
-    unit::smem2reg(reg,  s_in+(laneid/4)*N, s_in+(laneid/4+8)*N, 1);
+    int b =  ((laneid>>1) & 1);
+    int pad_r = ((laneid/4)&1);
+
+    float *i_0 = (float*)(s_in+(laneid/4)*(N+pad(N)) - pad_r);
+    float *i_1 = (float*)(s_in+(laneid/4+8)*(N+pad(N)) - pad_r);
+
+    for (int i = 0; i < ept / 2; i++) {
+        reg[2 * i] =
+            i_0[(i * 4 + (laneid % 2) * 2    ) * 2 + b];
+        reg[2 * i + 1] =
+            i_0[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
+        reg[2 * i + ept] =
+            i_1[(i * 4 + (laneid % 2) * 2    ) * 2 + b];
+        reg[2 * i + ept + 1] =
+            i_1[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
+    }
 
     unit::fft_kernel_r64_b16(reg, W_N);
 
-    unit::reg2smem(reg, s_out+(laneid/4)*N, s_out + (laneid/4+8)*N, 1);
-
-    // for (int i = 0; i < ept; i++) {
-    //     if ((laneid % 4) < 2) {
-    //         s_out[laneid / 4 * N + i / 2 + (i & 1) * 16 + (laneid % 2) * 32]
-    //             .x = reg[i];
-    //         s_out[(laneid / 4 + 8) * N + i / 2 + (i & 1) * 16 +
-    //                (laneid % 2) * 32]
-    //             .x = reg[i + ept];
-    //     } else {
-    //         s_out[laneid / 4 * N + i / 2 + (i & 1) * 16 + (laneid % 2) * 32]
-    //             .y = reg[i];
-    //         s_out[(laneid / 4 + 8) * N + i / 2 + (i & 1) * 16 +
-    //                (laneid % 2) * 32]
-    //             .y = reg[i + ept];
-    //     }
-    // }
+    float *o_0 = (float*)(s_out+(laneid/4)*(N+pad(N)));
+    float *o_1 = (float*)(s_out+(laneid/4+8)*(N+pad(N)));
+    for (int i = 0; i < ept; i++) {
+        o_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * 33) * 2 + b] = reg[i];
+        o_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * 33) * 2 + b] = reg[i + ept];
+    }
 
     __syncwarp();
-}
-
-} // namespace thunderfft::detail::fp32_n64_b16
-
-namespace thunderfft::detail {
-template <>
-__device__ __forceinline__
-void ThunderFFT_kernel_shared<float, 256, 16>(vec2_t<float>* __restrict__ s_in,
-                                             vec2_t<float>* __restrict__ s_out,
-                                             const float*   __restrict__ W_N) {
-    fp32_n256_b16::body(s_in, s_out, W_N);
 }
 } // namespace thunderfft::detail
