@@ -1,4 +1,3 @@
-// sample/main.cu (float & float2) — ThunderFFT<float, N> vs cuFFT
 #include <cuda_runtime.h>
 #include <cufft.h>
 #include <cmath>
@@ -6,7 +5,6 @@
 #include <cstdlib>
 #include <iostream>
 #include <iomanip>
-#include <algorithm>
 
 #include <thunderfft/thunderfft.cuh>  // ThunderFFT<T,N>, ThunderFFTInitialize/Finalize
 
@@ -40,15 +38,8 @@
 static void make_test_input(float2* h, unsigned N, unsigned batch) {
     const float two_pi = 2.0f * float(M_PI);
     for (unsigned b = 0; b < batch; ++b) {
-        const float f0  = float(1 + b);
-        const float amp = 0.5f + 0.1f * float(b);
         for (unsigned i = 0; i < N; ++i) {
-            const float t  = float(i) / float(N);
-            const float re = amp * std::cos(two_pi * f0 * t)
-                           + 0.1f * std::cos(two_pi * 7.0f * t);
-            const float im = amp * std::sin(two_pi * f0 * t)
-                           + 0.1f * std::sin(two_pi * 7.0f * t);
-            h[b * N + i] = make_float2(re, im);
+            h[b * N + i] = make_float2(b, i);
         }
     }
 }
@@ -96,9 +87,9 @@ static double linf_rel(const float2* a, const float2* b, size_t n) {
 
 int main(int /*argc*/, char** /*argv*/) {
     // Compile-time N for ThunderFFT template
-    constexpr unsigned N = 4096;
+    constexpr unsigned N = 64;
 
-    unsigned batch = 65536; // adjust as you like
+    unsigned batch = 128; // adjust as you like
     int device     = 0;
 
     CHECK_CUDA(cudaSetDevice(device));
@@ -159,7 +150,7 @@ int main(int /*argc*/, char** /*argv*/) {
     CHECK_CUFFT(cufftExecC2C(plan,
                              reinterpret_cast<cufftComplex*>(d_in),
                              reinterpret_cast<cufftComplex*>(d_ref),
-                             CUFFT_FORWARD));
+                             CUFFT_INVERSE));
     CHECK_CUDA(cudaDeviceSynchronize());
     CHECK_CUDA(cudaMemcpy(h_ref, d_ref, bytes, cudaMemcpyDeviceToHost));
 
@@ -175,14 +166,18 @@ int main(int /*argc*/, char** /*argv*/) {
               << "  Linf_rel=" << err_linf << std::setprecision(6) << "\n";
 
     // Show first few bins for batch 0
-    const unsigned to_print = std::min<unsigned>(8, N);
+    const unsigned to_print = N*batch;
     std::cout << "First " << to_print << " bins (batch 0):\n";
     for (unsigned i = 0; i < to_print; ++i) {
         const float2 a = h_out[i];
         const float2 b = h_ref[i];
-        std::cout << "  k=" << std::setw(3) << i
-                  << "  TF=(" << a.x << ", " << a.y << ")"
-                  << "  cuFFT=(" << b.x << ", " << b.y << ")\n";
+        const float diff = std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+        if (diff > 1) {
+            std::cout << "  k=" << std::setw(3) << i
+                      << "  TF=(" << a.x << ", " << a.y << ")"
+                      << "  cuFFT=(" << b.x << ", " << b.y << ")"
+                      << "  diff=" << std::setprecision(3) << diff << "\n";
+        }
     }
 
     // Cleanup

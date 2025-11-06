@@ -1,5 +1,7 @@
 namespace thunderfft::detail::unit {
 
+static constexpr int warp_size = 32;
+
 __device__ __forceinline__ float W_cos(int index, int N) {
     return __cosf(-2 * PI * index / N);
 }
@@ -8,13 +10,15 @@ __device__ __forceinline__ int f(int x) {
     return (x % 2)*4+(x/2);
 }
 
+template <bool forward>
 __device__ __forceinline__ void fill_reg_b(float b[], int stride_log2, int stride, int i_perm,
                            int j_perm, int k,
                            const float *__restrict__ W_ptr, int stage) {
-    int i0 = threadIdx.x / 4;       // col
-    int i1 = threadIdx.x / 4;       // col
-    int j0 = (threadIdx.x % 4) * 2; // row (2j, 2j+1)
-    int j1 = (threadIdx.x % 4) * 2 + 1;
+    int laneid = threadIdx.x % warp_size;
+    int i0 = laneid / 4;       // col
+    int i1 = laneid / 4;       // col
+    int j0 = (laneid % 4) * 2; // row (2j, 2j+1)
+    int j1 = (laneid % 4) * 2 + 1;
 
     if (stage == 0) {
         j0=f(j0);
@@ -47,8 +51,18 @@ __device__ __forceinline__ void fill_reg_b(float b[], int stride_log2, int strid
                     stride * (j1 & 1);
     // auto w = W(j*(k+stride*i) + stride * ((threadIdx.x / 4) & 1),4*stride);
 
-    b[0] = W_cos(index1,4*stride);
-    b[1] = W_cos(index2,4*stride);
+    if constexpr (forward) {
+        b[0] = W_cos(index1,4*stride);
+        b[1] = W_cos(index2,4*stride);
+        // b[0] = 3.1f;
+        // b[1] = 3.2f;
+    } else {
+        b[0] = W_cos(index1,4*stride) * (1-2*((i0+j0)&1));
+        b[1] = W_cos(index2,4*stride) * (1-2*((i1+j1)&1));
+        // b[0] = 3.3f;
+        // b[1] = 3.4f;
+    }
+
     // b[0] = W_ptr[(index1 & (4 * stride - 1)) * (16 / stride)].x;
     // b[1] = W_ptr[(index2 & (4 * stride - 1)) * (16 / stride)].x;
 }
@@ -89,6 +103,7 @@ static __device__ __forceinline__ void mma_m16n8k8_tf32_f32_rowcol(float d[4], c
     // }
 }
 
+template <bool forward>
 __device__ void fft_kernel_r64_b16(float* reg, const float* w_4096)
 {
     // compile-time constants (function-local)
@@ -98,7 +113,6 @@ __device__ void fft_kernel_r64_b16(float* reg, const float* w_4096)
     constexpr int radix     = tc_k / 2;    // 4
     constexpr int iter      = 3;
     constexpr int n         = 64;          // 4^3
-    constexpr int warp_size = 32;
     constexpr int ept       = (n * tc_m) / warp_size; // element-per-thread (if needed)
 
     float reg_frag_zero[tc_m * tc_n / warp_size];
@@ -106,7 +120,7 @@ __device__ void fft_kernel_r64_b16(float* reg, const float* w_4096)
     for (int i = 0; i < tc_m * tc_n / warp_size; ++i)
         reg_frag_zero[i] = 0.0f;
 
-    const int laneid = threadIdx.x;
+    const int laneid = threadIdx.x % warp_size;
 
     #pragma unroll
     for (int i = 0; i < iter; ++i) {
@@ -130,7 +144,7 @@ __device__ void fft_kernel_r64_b16(float* reg, const float* w_4096)
             const int i_perm = ((j / stride) / 2 * 2) % radix;
             const int k      = j % stride;
 
-            fill_reg_b(reg_frag_b, i * 2, stride, i_perm, j_perm, k, w_4096, i);
+            fill_reg_b<forward>(reg_frag_b, i * 2, stride, i_perm, j_perm, k, w_4096, i);
 
             mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b, reg_frag_zero);
 
@@ -162,7 +176,7 @@ void smem2reg(float* __restrict__ tmp,
               const vec2_t<float>* __restrict__ s_1,
               int stride = 1)
 {
-    int laneid = threadIdx.x;
+    int laneid = threadIdx.x % warp_size;
     int block_id = blockIdx.x;
     int ept = 32; // N * batch / warp_size
     float2 *reg = reinterpret_cast<float2*>(tmp);
@@ -198,7 +212,7 @@ void reg2smem(float* __restrict__ tmp,
               vec2_t<float>* __restrict__ s_1,
               int stride = 1)
 {
-    int laneid = threadIdx.x;
+    int laneid = threadIdx.x % warp_size;
     int block_id = blockIdx.x;
     int ept = 32; // N * batch / warp_size
     float2 *reg = reinterpret_cast<float2*>(tmp);
