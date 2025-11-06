@@ -3,7 +3,7 @@
 #include <cuda_fp16.h>
 #include <iostream>
 
-#define PI 3.14159265358979323846
+#define PI 3.14159265358979323846f
 
 #define CHECK_CUDA(call)                                                       \
     do {                                                                       \

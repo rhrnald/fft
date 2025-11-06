@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18) # 3.18+ recommended for CUDA
+cmake_minimum_required(VERSION 3.25) # 3.18+ recommended for CUDA
 project(thunderfft LANGUAGES CXX CUDA)
 
 # ===== Build config =====
@@ -9,6 +9,7 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Architectures (e.g., "80;90")
 set(THUNDERFFT_ARCHS "80" CACHE STRING "CUDA SM architectures")
@@ -22,6 +23,7 @@ add_library(thunderfft INTERFACE)
 target_include_directories(thunderfft INTERFACE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
+  $<BUILD_INTERFACE:/home/sumin/nvidia-mathdx-25.06.1/nvidia/mathdx/25.06/external/cutlass/include>
 )
 # Consumers need cudart
 target_link_libraries(thunderfft INTERFACE CUDA::cudart)
