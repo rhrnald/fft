@@ -17,6 +17,7 @@ void ThunderFFT_kernel_shared<float, 64, 16>(vec2_t<float>* __restrict__ s_in,
     int block_id = blockIdx.x;
 
     float reg[ept * 2];
+    vec2_t<float>* reg2 = (vec2_t<float>*)reg;
 
     int b =  ((laneid>>1) & 1);
     int pad_r = ((laneid/4)&1);
@@ -34,7 +35,7 @@ void ThunderFFT_kernel_shared<float, 64, 16>(vec2_t<float>* __restrict__ s_in,
     //     reg[2 * i + ept + 1] =
     //         i_1[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
     // }
-    unit::smem2reg(reg, i_0, i_1, 1);
+    unit::smem2reg(reg2, i_0, i_1, 1);
 
     unit::fft_kernel_r64_b16(reg, W_N);
 
@@ -44,7 +45,7 @@ void ThunderFFT_kernel_shared<float, 64, 16>(vec2_t<float>* __restrict__ s_in,
     //     o_0[(i / 2 + (i & 1) * 16 + (laneid % 2) * 33) * 2 + b] = reg[i];
     //     o_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * 33) * 2 + b] = reg[i + ept];
     // }
-    unit::reg2smem(reg, o_0, o_1, 1);
+    unit::reg2smem(reg2, o_0, o_1, 1);
 
     __syncwarp();
 }

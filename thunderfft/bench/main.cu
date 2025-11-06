@@ -17,9 +17,9 @@ template <long long N> int test() {
     float2 *h_output = (float2 *)malloc(sizeof(float2) * N * batch);
 
     for (int i = 0; i < N * batch; ++i) {
-        h_input[i].x = sinf(2 * M_PI * (i % N) / N)+2.0f;
+        h_input[i].x = sinf(2 * M_PI * (i % N)/N);
         // h_input[i].x = i % N;
-        h_input[i].y = 1.0f;
+        h_input[i].y = 0.0f;
 
         h_input_half[i] = make_half2(h_input[i].x, h_input[i].y);
     }
@@ -41,10 +41,10 @@ template <long long N> int test() {
 }
 
 int main() {
-    test<64>();
+    // test<64>();
     // test<256>();
     // test<1024>();
-    // test<4096>();
+    test<4096>();
 
     stat::set_title("FFT benchmark results");
     stat::print_table();

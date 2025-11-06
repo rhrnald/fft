@@ -157,7 +157,7 @@ __device__ void fft_kernel_r64_b16(float* reg, const float* w_4096)
 }
 
 __device__ __forceinline__
-void smem2reg(float* __restrict__ tmp,
+void smem2reg(vec2_t<float>* reg,
               const vec2_t<float>* __restrict__ s_0,
               const vec2_t<float>* __restrict__ s_1,
               int stride = 1)
@@ -165,7 +165,6 @@ void smem2reg(float* __restrict__ tmp,
     int laneid = threadIdx.x;
     int block_id = blockIdx.x;
     int ept = 32; // N * batch / warp_size
-    float2 *reg = reinterpret_cast<float2*>(tmp);
 
     int b =  ((laneid>>1) & 1);
     for (int i = 0; i < ept / 2; i++) { 
@@ -173,9 +172,9 @@ void smem2reg(float* __restrict__ tmp,
         // reg[i+ept/2] = f_1[laneid + 32*i];
 
         reg[i] =
-            s_0[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2    ) * stride];
+            s_0[(i * 4 + (laneid % 4) ) * stride];
         reg[i + ept / 2] =
-            s_1[reverse_bit_groups<2,6>(i * 4 + (laneid % 2) * 2    ) * stride];
+            s_1[(i * 4 + (laneid % 4) ) * stride];
         // reg[2 * i] =
         //     f_0[(i * 4 + (laneid % 2) * 2    ) * stride * 2 + b];
         // reg[2 * i + 1] =
@@ -193,7 +192,7 @@ void smem2reg(float* __restrict__ tmp,
 }
 
 __device__ __forceinline__
-void reg2smem(float* __restrict__ tmp,
+void reg2smem(vec2_t<float>* reg,
               vec2_t<float>* __restrict__ s_0,
               vec2_t<float>* __restrict__ s_1,
               int stride = 1)
@@ -201,7 +200,6 @@ void reg2smem(float* __restrict__ tmp,
     int laneid = threadIdx.x;
     int block_id = blockIdx.x;
     int ept = 32; // N * batch / warp_size
-    float2 *reg = reinterpret_cast<float2*>(tmp);
     int b =  ((laneid>>1) & 1);
 
 
@@ -220,8 +218,8 @@ void reg2smem(float* __restrict__ tmp,
         //     s_1[(i / 2 + (i & 1) * 16 + (laneid % 2) * 32)*stride]
         //         .y = reg[i + ept];
         // }
-        s_0[(i + (laneid % 4) * (16/*+1*/))*stride] = reg[i];
-        s_1[(i + (laneid % 4) * (16/*+1*/))*stride] = reg[i + ept/2];
+        s_0[(i + (laneid % 4) * (17))*stride] = reg[i];
+        s_1[(i + (laneid % 4) * (17))*stride] = reg[i + ept/2];
     }
 }
 

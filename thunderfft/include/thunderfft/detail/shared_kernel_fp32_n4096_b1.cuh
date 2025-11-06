@@ -19,13 +19,14 @@ void body(vec2_t<float>* __restrict__ s_in,
     int laneid = threadIdx.x;
     int block_id = blockIdx.x;
 
-    float reg[ept * 2];
+    vec2_t<float> reg2[ept];
+    float* reg = (float*)reg;
 
 
     for(int i=0; i<4; i++) {
-        unit::smem2reg(reg,  s_in+(laneid/4) + i * 16, s_in+(laneid/4+8) + i*16, 64);
+        unit::smem2reg(reg2,  s_in+(laneid/4) + i * 16, s_in+(laneid/4+8) + i*16, 64);
         unit::fft_kernel_r64_b16(reg, W_N);
-        unit::reg2smem(reg, s_out+((laneid/4) + i * 16)*N, s_out + ((laneid/4+8) + i*16)*N, 1);
+        unit::reg2smem(reg2, s_out+((laneid/4) + i * 16)*N, s_out + ((laneid/4+8) + i*16)*N, 1);
         // unit::reg2smem(reg, s_out+(laneid/4) + i * 16, s_out + (laneid/4+8) + i*16, 64);
     }
 
@@ -43,10 +44,10 @@ void body(vec2_t<float>* __restrict__ s_in,
 
     for(int i=0; i<4; i++) {
         // unit::smem2reg(reg, s_out+((laneid/4) + i * 16)*N, s_out + ((laneid/4+8) + i*16)*N, 1);
-        unit::smem2reg(reg,  s_out+(laneid/4) + i * 16, s_out+(laneid/4+8) + i*16, 64);
+        unit::smem2reg(reg2,  s_out+(laneid/4) + i * 16, s_out+(laneid/4+8) + i*16, 64);
         unit::fft_kernel_r64_b16(reg, W_N);
         // unit::reg2smem(reg, s_out+((laneid/4) + i * 16)*N, s_out + ((laneid/4+8) + i*16)*N, 1);
-        unit::reg2smem(reg, s_out+(laneid/4) + i * 16, s_out + (laneid/4+8) + i*16, 64);
+        unit::reg2smem(reg2, s_out+(laneid/4) + i * 16, s_out + (laneid/4+8) + i*16, 64);
     }
 }
 
