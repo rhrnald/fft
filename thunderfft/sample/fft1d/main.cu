@@ -5,32 +5,10 @@
 #include <cstdlib>
 #include <iostream>
 #include <iomanip>
+#include <algorithm>
 
 #include <thunderfft/thunderfft.cuh>  // ThunderFFT<T,N>, ThunderFFTInitialize/Finalize
-
-#ifndef CHECK_CUDA
-#define CHECK_CUDA(stmt)                                                       \
-    do {                                                                       \
-        cudaError_t err__ = (stmt);                                            \
-        if (err__ != cudaSuccess) {                                            \
-            std::fprintf(stderr, "CUDA error %s at %s:%d: %s\n", #stmt,        \
-                         __FILE__, __LINE__, cudaGetErrorString(err__));       \
-            std::exit(EXIT_FAILURE);                                           \
-        }                                                                      \
-    } while (0)
-#endif
-
-#ifndef CHECK_CUFFT
-#define CHECK_CUFFT(stmt)                                                      \
-    do {                                                                       \
-        cufftResult res__ = (stmt);                                            \
-        if (res__ != CUFFT_SUCCESS) {                                          \
-            std::fprintf(stderr, "cuFFT error %s at %s:%d: code %d\n", #stmt,  \
-                         __FILE__, __LINE__, int(res__));                      \
-            std::exit(EXIT_FAILURE);                                           \
-        }                                                                      \
-    } while (0)
-#endif
+#include "../utils.h"
 
 // ------------------------------
 // Test input (bin-aligned tones)
@@ -38,8 +16,15 @@
 static void make_test_input(float2* h, unsigned N, unsigned batch) {
     const float two_pi = 2.0f * float(M_PI);
     for (unsigned b = 0; b < batch; ++b) {
+        const float f0  = float(1 + b);
+        const float amp = 0.5f + 0.1f * float(b);
         for (unsigned i = 0; i < N; ++i) {
-            h[b * N + i] = make_float2(b, i);
+            const float t  = float(i) / float(N);
+            const float re = amp * std::cos(two_pi * f0 * t)
+                           + 0.1f * std::cos(two_pi * 7.0f * t);
+            const float im = amp * std::sin(two_pi * f0 * t)
+                           + 0.1f * std::sin(two_pi * 7.0f * t);
+            h[b * N + i] = make_float2(re, im);
         }
     }
 }
@@ -87,9 +72,9 @@ static double linf_rel(const float2* a, const float2* b, size_t n) {
 
 int main(int /*argc*/, char** /*argv*/) {
     // Compile-time N for ThunderFFT template
-    constexpr unsigned N = 64;
+    constexpr unsigned N = 4096;
 
-    unsigned batch = 128; // adjust as you like
+    unsigned batch = 65536; // adjust as you like
     int device     = 0;
 
     CHECK_CUDA(cudaSetDevice(device));
@@ -125,22 +110,12 @@ int main(int /*argc*/, char** /*argv*/) {
     thunderfft::ThunderFFTInitialize<float>(N);
 
     // --- ThunderFFT run (warm-up + timed) ---
-    thunderfft::ThunderFFT<float, N>(d_in, d_out, batch, /*stream=*/0);
-    CHECK_CUDA(cudaDeviceSynchronize());
-
-    const int iters = 5;
-    cudaEvent_t start{}, stop{};
-    CHECK_CUDA(cudaEventCreate(&start));
-    CHECK_CUDA(cudaEventCreate(&stop));
-    CHECK_CUDA(cudaEventRecord(start));
-    for (int i = 0; i < iters; ++i) {
-        thunderfft::ThunderFFT<float, N>(d_in, d_out, batch, /*stream=*/0);
-    }
-    CHECK_CUDA(cudaEventRecord(stop));
-    CHECK_CUDA(cudaEventSynchronize(stop));
-    float ms_tf = 0.f;
-    CHECK_CUDA(cudaEventElapsedTime(&ms_tf, start, stop));
-    ms_tf /= float(iters);
+    const unsigned int warm_up_runs = 1;
+    const unsigned int runs = 5;
+    const float ms_tf = measure_execution_ms(
+        [&]() { thunderfft::ThunderFFT<float, N>(d_in, d_out, batch, /*stream=*/0); },
+        warm_up_runs,
+        runs);
 
     CHECK_CUDA(cudaMemcpy(h_out, d_out, bytes, cudaMemcpyDeviceToHost));
 
@@ -150,7 +125,7 @@ int main(int /*argc*/, char** /*argv*/) {
     CHECK_CUFFT(cufftExecC2C(plan,
                              reinterpret_cast<cufftComplex*>(d_in),
                              reinterpret_cast<cufftComplex*>(d_ref),
-                             CUFFT_INVERSE));
+                             CUFFT_FORWARD));
     CHECK_CUDA(cudaDeviceSynchronize());
     CHECK_CUDA(cudaMemcpy(h_ref, d_ref, bytes, cudaMemcpyDeviceToHost));
 
@@ -166,25 +141,19 @@ int main(int /*argc*/, char** /*argv*/) {
               << "  Linf_rel=" << err_linf << std::setprecision(6) << "\n";
 
     // Show first few bins for batch 0
-    const unsigned to_print = N*batch;
+    const unsigned to_print = std::min<unsigned>(8, N);
     std::cout << "First " << to_print << " bins (batch 0):\n";
     for (unsigned i = 0; i < to_print; ++i) {
         const float2 a = h_out[i];
         const float2 b = h_ref[i];
-        const float diff = std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
-        if (diff > 1) {
-            std::cout << "  k=" << std::setw(3) << i
-                      << "  TF=(" << a.x << ", " << a.y << ")"
-                      << "  cuFFT=(" << b.x << ", " << b.y << ")"
-                      << "  diff=" << std::setprecision(3) << diff << "\n";
-        }
+        std::cout << "  k=" << std::setw(3) << i
+                  << "  TF=(" << a.x << ", " << a.y << ")"
+                  << "  cuFFT=(" << b.x << ", " << b.y << ")\n";
     }
 
     // Cleanup
     thunderfft::ThunderFFTFinalize<float>();
     CHECK_CUFFT(cufftDestroy(plan));
-    CHECK_CUDA(cudaEventDestroy(start));
-    CHECK_CUDA(cudaEventDestroy(stop));
     CHECK_CUDA(cudaFree(d_in));
     CHECK_CUDA(cudaFree(d_out));
     CHECK_CUDA(cudaFree(d_ref));
