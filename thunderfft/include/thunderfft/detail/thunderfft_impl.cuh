@@ -9,8 +9,6 @@
 
 #include "utils.h"
 
-#include "cute/tensor.hpp"
-
 #include "thunderfft/detail/unit_kernel_fp32.cuh"
 
 namespace thunderfft::detail {
@@ -23,8 +21,8 @@ void ThunderFFT_kernel_shared(vec2_t<T>* __restrict__ s_in,
 
 }
 
-// #include "thunderfft/detail/shared_kernel_fp32_n64_b16.cuh"
-// #include "thunderfft/detail/shared_kernel_fp32_n4096_b1.cuh"
+#include "thunderfft/detail/shared_kernel_fp32_n64_b16.cuh"
+#include "thunderfft/detail/shared_kernel_fp32_n4096_b1.cuh"
 
 namespace thunderfft::detail {
 
@@ -42,8 +40,6 @@ void ThunderFFT_kernel_shared(vec2_t<T>* __restrict__ s_in,
 // Global kernels (implemented)
 // ===================================
 
-using namespace cute;
-
 template <typename T, unsigned N, unsigned batch_per_block>
 static __global__ void ThunderFFT_kernel(
     vec2_t<T>*       d_input,
@@ -51,57 +47,37 @@ static __global__ void ThunderFFT_kernel(
     const T*         __restrict__ dW) {
     extern __shared__ vec2_t<T> smem[];
     constexpr int logN = LOG2P_builtin<N>;
-    constexpr int ept = N * batch_per_block / 32;
+    vec2_t<T>* s_in  = smem;
+    vec2_t<T>* s_out = smem + (N+pad(N)) * batch_per_block;
 
-    auto gmem_layout = make_layout(
-        make_shape(
-            blockDim.x * batch_per_block,
-            Int<N>{}
-        ),
-        LayoutRight()
-    );
-    auto input_tensor = make_tensor(make_gmem_ptr(d_input), gmem_layout);
-    auto output_tensor = make_tensor(make_gmem_ptr(d_output), gmem_layout);
+    const unsigned b = blockIdx.x;
 
-    auto smem_layout = make_layout(
-        make_shape(Int<batch_per_block>{}, Int<N>{}),
-        LayoutRight()
-    );
-
-    auto smem_tensor = make_tensor(make_smem_ptr(smem), smem_layout);
-
-    auto cta_tiler = make_shape(Int<batch_per_block>{}, Int<N>{});
-    auto input_tile = local_tile(input_tensor, cta_tiler, blockIdx.x);
-    auto output_tile = local_tile(output_tensor, cta_tiler, blockIdx.x);
-    
     // gmem -> smem
-    for (int i = 0; i < batch_per_block; i++) {
-        smem_tensor(i, threadIdx.x) = input_tile(i, reverse_bit_groups<2,6>(threadIdx.x));
-        smem_tensor(i, threadIdx.x + 32) = input_tile(i, reverse_bit_groups<2,6>(threadIdx.x + 32));
+    // for (unsigned i = threadIdx.x; i < N * batch_per_block; i += blockDim.x) {
+    //     s_in[i] = d_input[b * N * batch_per_block + i];
+    // }
+    for (unsigned i = 0; i < batch_per_block; i++) {
+        for(unsigned j=threadIdx.x; j<N; j+= blockDim.x) {
+            s_in[i * (N+pad(N))+ j] = d_input[b * N * batch_per_block + i * N + reverse_bit_groups<2,6>(j)];
+            // s_in[i * (N+pad)+ j] = d_input[b * N * batch_per_block + i * N + j];
+        }
     }
     __syncthreads();
 
-    auto reg = make_tensor<vec2_t<T>>(make_shape(Int<ept>{}), LayoutRight());
-
-    // smem -> reg
-    for (int i = 0; i < ept / 2; i++) {
-        reg(i) = smem_tensor(threadIdx.x/4, i*4 + (threadIdx.x % 4));
-        reg(i + ept/2) = smem_tensor(threadIdx.x/4 + batch_per_block/2, i*4 + (threadIdx.x % 4));
-    }
-
-    unit::fft_kernel_r64_b16<false>(reinterpret_cast<float*>(reg.data()), dW);
-    __syncthreads();
-
-    for (int i = 0; i < ept/2; i++) {
-        smem_tensor(threadIdx.x/4, i + (ept/2)*(threadIdx.x % 4)) = reg(i);
-        smem_tensor(threadIdx.x/4 + batch_per_block/2, i + (ept/2)*(threadIdx.x % 4)) = reg(i + ept/2);
-    }
+    // Shared compute
+    ThunderFFT_kernel_shared<T, N, batch_per_block>(s_in, s_out, dW);
     __syncthreads();
 
     // smem -> gmem
-    for (int i = 0; i < batch_per_block; i++) {
-        output_tile(i, threadIdx.x) = smem_tensor(i, threadIdx.x);
-        output_tile(i, threadIdx.x + 32) = smem_tensor(i, threadIdx.x + 32);
+    // for (unsigned i = threadIdx.x; i < N * batch_per_block; i += blockDim.x) {
+    //     d_output[b * N * batch_per_block + i] = s_out[i];
+    // }
+    __syncthreads();
+
+    for (unsigned i = 0; i < batch_per_block; i++) {
+        for(unsigned j=threadIdx.x; j<N; j+= blockDim.x) {
+            d_output[b * N * batch_per_block + i * N + j] = s_out[i * (N+pad(N)) + j];
+        }
     }
 }
 
