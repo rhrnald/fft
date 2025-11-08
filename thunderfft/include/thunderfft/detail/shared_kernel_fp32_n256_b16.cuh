@@ -1,9 +1,9 @@
-namespace thunderfft::detail {
-template <>
+namespace thunderfft::detail::fp32_n256_b16 {
+template <bool forward>
 __device__ __forceinline__
-void ThunderFFT_kernel_shared<float, 256, 16>(vec2_t<float>* __restrict__ s_in,
-                                             vec2_t<float>* __restrict__ s_out,
-                                             const float*   __restrict__ W_N) {
+void body(vec2_t<float>* __restrict__ s_in,
+          vec2_t<float>* __restrict__ s_out,
+          const float*   __restrict__ W_N) {
     constexpr int N = 256; 
     constexpr int batch = 16;
     constexpr int warp_size = 32;
@@ -17,7 +17,7 @@ void ThunderFFT_kernel_shared<float, 256, 16>(vec2_t<float>* __restrict__ s_in,
     int block_id = blockIdx.x;
 
     float reg[ept * 2];
-
+    
     int b =  ((laneid>>1) & 1);
     int pad_r = ((laneid/4)&1);
 
@@ -35,7 +35,7 @@ void ThunderFFT_kernel_shared<float, 256, 16>(vec2_t<float>* __restrict__ s_in,
             i_1[(i * 4 + (laneid % 2) * 2 + 1) * 2 + b];
     }
 
-    unit::fft_kernel_r64_b16(reg, W_N);
+    unit::fft_kernel_r64_b16<forward>(reg, W_N);
 
     float *o_0 = (float*)(s_out+(laneid/4)*(N+pad(N)));
     float *o_1 = (float*)(s_out+(laneid/4+8)*(N+pad(N)));
@@ -46,4 +46,4 @@ void ThunderFFT_kernel_shared<float, 256, 16>(vec2_t<float>* __restrict__ s_in,
 
     __syncwarp();
 }
-} // namespace thunderfft::detail
+} // namespace thunderfft::detail::fp32_n256_b16

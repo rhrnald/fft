@@ -1,4 +1,5 @@
 namespace thunderfft::detail::fp32_n4096_b1 {
+template <bool forward>
 __device__ __forceinline__
 void body(vec2_t<float>* __restrict__ s_in,
           vec2_t<float>* __restrict__ s_out,
@@ -25,7 +26,7 @@ void body(vec2_t<float>* __restrict__ s_in,
 
     for(int i=0; i<4; i++) {
         unit::smem2reg(reg2,  s_in+(laneid/4) + i * 16, s_in+(laneid/4+8) + i*16, 64);
-        unit::fft_kernel_r64_b16(reg, W_N);
+        unit::fft_kernel_r64_b16<forward>(reg, W_N);
         unit::reg2smem(reg2, s_out+((laneid/4) + i * 16)*N, s_out + ((laneid/4+8) + i*16)*N, 1);
         // unit::reg2smem(reg, s_out+(laneid/4) + i * 16, s_out + (laneid/4+8) + i*16, 64);
     }
@@ -45,20 +46,10 @@ void body(vec2_t<float>* __restrict__ s_in,
     for(int i=0; i<4; i++) {
         // unit::smem2reg(reg, s_out+((laneid/4) + i * 16)*N, s_out + ((laneid/4+8) + i*16)*N, 1);
         unit::smem2reg(reg2,  s_out+(laneid/4) + i * 16, s_out+(laneid/4+8) + i*16, 64);
-        unit::fft_kernel_r64_b16(reg, W_N);
+        unit::fft_kernel_r64_b16<forward>(reg, W_N);
         // unit::reg2smem(reg, s_out+((laneid/4) + i * 16)*N, s_out + ((laneid/4+8) + i*16)*N, 1);
         unit::reg2smem(reg2, s_out+(laneid/4) + i * 16, s_out + (laneid/4+8) + i*16, 64);
     }
 }
 
 } // namespace thunderfft::detail::fp32_n64_b16
-
-namespace thunderfft::detail {
-template <>
-__device__ __forceinline__
-void ThunderFFT_kernel_shared<float, 4096, 1>(vec2_t<float>* __restrict__ s_in,
-                                             vec2_t<float>* __restrict__ s_out,
-                                             const float*   __restrict__ W_N) {
-    fp32_n4096_b1::body(s_in, s_out, W_N);
-}
-} // namespace thunderfft::detail

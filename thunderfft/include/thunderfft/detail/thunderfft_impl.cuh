@@ -11,36 +11,37 @@
 
 #include "thunderfft/detail/unit_kernel_fp32.cuh"
 
-namespace thunderfft::detail {
-// Primary template declaration (must be visible before specialization)
-template <typename T, unsigned N, unsigned BATCH>
-__device__ __forceinline__
-void ThunderFFT_kernel_shared(vec2_t<T>* __restrict__ s_in,
-                              vec2_t<T>* __restrict__ s_out,
-                              const T*   __restrict__ W_N);
-
-}
-
 #include "thunderfft/detail/shared_kernel_fp32_n64_b16.cuh"
+#include "thunderfft/detail/shared_kernel_fp32_n256_b16.cuh"
+#include "thunderfft/detail/shared_kernel_fp32_n1024_b16.cuh"
 #include "thunderfft/detail/shared_kernel_fp32_n4096_b1.cuh"
 
 namespace thunderfft::detail {
 
-template <typename T, unsigned N, unsigned BATCH>
+template <typename T, unsigned N, unsigned BATCH, bool forward>
 __device__ __forceinline__
 void ThunderFFT_kernel_shared(vec2_t<T>* __restrict__ s_in,
                               vec2_t<T>* __restrict__ s_out,
-                              const T*   __restrict__ W_N);
+                              const T*   __restrict__ W_N) {
+    if constexpr (std::is_same_v<T, float>) {
+        if constexpr (N == 64 && BATCH == 16) {
+            fp32_n64_b16::body<forward>(s_in, s_out, W_N);
+        } else if constexpr (N == 256 && BATCH == 16) {
+            fp32_n256_b16::body<forward>(s_in, s_out, W_N);
+        } else if constexpr (N == 1024 && BATCH == 16) {
+            fp32_n1024_b16::body<forward>(s_in, s_out, W_N);
+        } else if constexpr (N == 4096 && BATCH == 1) {
+            fp32_n4096_b1::body<forward>(s_in, s_out, W_N);
+        } else {
+            static_assert(N == 64 || N == 256 || N == 1024 || N == 4096,
+                "N must be one of {64,256,1024,4096}");
+        }
+    } else {
+        static_assert(std::is_same_v<T, float>, "Unsupported data type");
+    }
+}
 
-// ===============================
-// Shared device kernels 
-// ===============================
-
-// ===================================
-// Global kernels (implemented)
-// ===================================
-
-template <typename T, unsigned N, unsigned batch_per_block>
+template <typename T, unsigned N, unsigned batch_per_block, bool forward>
 static __global__ void ThunderFFT_kernel(
     vec2_t<T>*       d_input,
     vec2_t<T>*       d_output,
@@ -65,7 +66,7 @@ static __global__ void ThunderFFT_kernel(
     __syncthreads();
 
     // Shared compute
-    ThunderFFT_kernel_shared<T, N, batch_per_block>(s_in, s_out, dW);
+    ThunderFFT_kernel_shared<T, N, batch_per_block, forward>(s_in, s_out, dW);
     __syncthreads();
 
     // smem -> gmem
@@ -166,7 +167,7 @@ inline void ThunderFFTFinalize() {
 // ============================
 // Host wrapper (grid policy)
 // ============================
-template <typename T, unsigned N>
+template <typename T, unsigned N, bool forward>
 inline void ThunderFFT(vec2_t<T>* d_input,
                 vec2_t<T>* d_output,
                 unsigned   batch,
@@ -180,7 +181,8 @@ inline void ThunderFFT(vec2_t<T>* d_input,
 
     // Shared memory: [in | out], each N elements
 
-    constexpr unsigned batch_per_block = (N <= 512u ? 16u : 1u);
+    // constexpr unsigned batch_per_block = (N <= 512u ? 16u : 1u);
+    constexpr unsigned batch_per_block = (N <= 2048u ? 16u : 1u);
     constexpr unsigned threads_per_warp = 32;
 
     const dim3 grid(batch / batch_per_block );
@@ -188,9 +190,9 @@ inline void ThunderFFT(vec2_t<T>* d_input,
 
     
     const size_t shmem_bytes = 2 * sizeof(vec2_t<T>) * (N+pad_h(N)) * batch_per_block;
-    cudaFuncSetAttribute(detail::ThunderFFT_kernel<T, N, batch_per_block>, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_bytes);
+    cudaFuncSetAttribute(detail::ThunderFFT_kernel<T, N, batch_per_block, forward>, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_bytes);
 
-    detail::ThunderFFT_kernel<T, N, batch_per_block><<<grid, block, shmem_bytes, stream>>>(
+    detail::ThunderFFT_kernel<T, N, batch_per_block, forward><<<grid, block, shmem_bytes, stream>>>(
         d_input, d_output, dW
     );
 

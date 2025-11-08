@@ -46,7 +46,7 @@ ThunderFFT_kernel_shared_batch1(vec2_t<T>* __restrict__ s_input,
 //   - d_input / d_output length: N * batch (in vec2_t<T> elements)
 //   - NO global constraint here (the host may tile/launch as needed)
 // --------------------------------------------
-template <typename T, unsigned N>
+template <typename T, unsigned N, bool forward = true>
 inline void ThunderFFT(vec2_t<T> *d_input, vec2_t<T> *d_output,
                 unsigned int batch, cudaStream_t stream = 0);
 

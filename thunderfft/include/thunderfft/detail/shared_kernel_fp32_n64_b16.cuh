@@ -1,9 +1,9 @@
-namespace thunderfft::detail {
-template <>
+namespace thunderfft::detail::fp32_n64_b16 {
+template <bool forward>
 __device__ __forceinline__
-void ThunderFFT_kernel_shared<float, 64, 16>(vec2_t<float>* __restrict__ s_in,
-                                             vec2_t<float>* __restrict__ s_out,
-                                             const float*   __restrict__ W_N) {
+void body(vec2_t<float>* __restrict__ s_in,
+          vec2_t<float>* __restrict__ s_out,
+          const float*   __restrict__ W_N) {
     constexpr int N = 64; // radix^iter
     constexpr int batch = 16;
     constexpr int warp_size = 32;
@@ -37,7 +37,7 @@ void ThunderFFT_kernel_shared<float, 64, 16>(vec2_t<float>* __restrict__ s_in,
     // }
     unit::smem2reg(reg2, i_0, i_1, 1);
 
-    unit::fft_kernel_r64_b16(reg, W_N);
+    unit::fft_kernel_r64_b16<forward>(reg, W_N);
 
     vec2_t<float> *o_0 = (s_out+(laneid/4)*(N+pad(N)));
     vec2_t<float> *o_1 = (s_out+(laneid/4+8)*(N+pad(N)));
@@ -49,4 +49,4 @@ void ThunderFFT_kernel_shared<float, 64, 16>(vec2_t<float>* __restrict__ s_in,
 
     __syncwarp();
 }
-} // namespace thunderfft::detail
+} // namespace thunderfft::detail::fp32_n64_b16
