@@ -10,6 +10,8 @@
 #include "utils.h"
 
 #include "thunderfft/detail/unit_kernel_fp32.cuh"
+#include "thunderfft/detail/unit_kernel_fp16.cuh"
+
 
 #include "thunderfft/detail/shared_kernel_fp32_n64_b16.cuh"
 #include "thunderfft/detail/shared_kernel_fp32_n256_b16.cuh"
