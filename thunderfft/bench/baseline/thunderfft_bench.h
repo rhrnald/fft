@@ -44,7 +44,7 @@ __global__ void ThunderFFT_kernel_ir<float,64,16>(
     __syncthreads();
 
     // repeat in shared memory
-    for (unsigned r = 0; r < inside_repeats; ++r) {
+    // for (unsigned r = 0; r < inside_repeats; ++r) {
         float reg[ept * 2];
         vec2_t<float>* reg2 = (vec2_t<float>*)reg;
 
@@ -56,16 +56,16 @@ __global__ void ThunderFFT_kernel_ir<float,64,16>(
 
         thunderfft::detail::unit::smem2reg(reg2, i_0, i_1, 1);
 
-        // for (unsigned r = 0; r < inside_repeats; ++r) {
+        for (unsigned r = 0; r < inside_repeats; ++r) {
             thunderfft::detail::unit::fft_kernel_r64_b16<true>(reg, dW);
-        // }
+        }
 
         auto *o_0 = (s_out+(laneid/4)*(N+4));
         auto *o_1 = (s_out+(laneid/4+8)*(N+4));
 
         thunderfft::detail::unit::reg2smem(reg2, o_0, o_1, 1);
         __syncthreads();
-    }
+    // }
 
     for (unsigned i = 0; i < batch_per_block; i++) {
         for(unsigned j=threadIdx.x; j<N; j+= blockDim.x) {
@@ -252,6 +252,24 @@ __global__ void ThunderFFT_kernel_ir<float,4096,1>(
     // for (int r = 0; r < 100; ++r) {
     for (int r = 0; r < inside_repeats; ++r) {
         thunderfft::detail::unit::fft_kernel_r64_b16<true>(reg, dW);
+
+        for(int i=0; i<ept/2; i++) {
+            int col = i + (laneid%4)*16;
+            // int row1 = (laneid/4) + warpid * 16;
+            // int row2 = (laneid/4+8) + warpid * 16;
+            int rev_row1 = warpid + laneid/16 * 4 + ((laneid/4) % 4) * 16;
+            int rev_row2 = rev_row1+8;
+            
+            // reg2[i] = cmul(reg2[i], W(col * reverse_bit_groups<2,6>(row1), 4096));
+            // reg2[i+ept/2] = cmul(reg2[i+ept/2], W(col * reverse_bit_groups<2,6>(row2), 4096));
+            reg2[i] = cmul(reg2[i], W(col * rev_row1, 4096));
+            reg2[i+ept/2] = cmul(reg2[i+ept/2], W(col * rev_row2, 4096));
+        }
+        // for(int i=0; i<ept; i++) {
+        //     int index = (laneid%4) + (i/16)*32 + warpid*128;
+        //     reg2[i] = cmul(reg2[i], W(index, 4096));
+        // }
+
         thunderfft::detail::unit::reg2smem(reg2, s_out+((laneid/4) + warpid * 16)*(64+4), s_out + ((laneid/4+8) + warpid*16)*(64+4), 1);
 
         __syncthreads();
@@ -266,11 +284,6 @@ __global__ void ThunderFFT_kernel_ir<float,4096,1>(
         auto s_0 = s_out + (laneid/4) + warpid * 17;
         auto s_1 = s_out + (laneid/4+8) + warpid * 17;
         thunderfft::detail::unit::smem2reg(reg2,  s_0, s_1, 64+4);
-        for(int i=0; i<ept; i++) {
-            int index = (laneid%4) + (i/16)*32 + warpid*128;
-            reg2[i] = cmul(reg2[i], W(index, 4096));
-        }
-
         thunderfft::detail::unit::fft_kernel_r64_b16<true>(reg, dW);
 
 

@@ -29,5 +29,5 @@ target_link_libraries(thunderfft INTERFACE CUDA::cudart)
 target_compile_features(thunderfft INTERFACE cxx_std_17)
 
 # Subdirs
-add_subdirectory(sample)
+# add_subdirectory(sample)
 add_subdirectory(bench)

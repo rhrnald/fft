@@ -1,4 +1,4 @@
-namespace thunderfft::detail::unit {
+namespace thunderfft::detail::unit_fp16 {
 
 static constexpr int warp_size = 32;
 
@@ -57,8 +57,11 @@ __device__ __forceinline__ void fill_reg_b(float b[], int stride_log2, int strid
         // b[0] = 3.1f;
         // b[1] = 3.2f;
     } else {
-        b[0] = W_cos(index1,4*stride) * (1-2*((i0+j0)&1));
-        b[1] = W_cos(index2,4*stride) * (1-2*((i1+j1)&1));
+        // b[0] = W_cos(index1,4*stride) * (1-2*((i0+j0)&1));
+        // b[1] = W_cos(index2,4*stride) * (1-2*((i1+j1)&1));
+        
+        b[0] = ((i0+j0)&1)? W_cos(index1,4*stride) : - W_cos(index1,4*stride);
+        b[1] = ((i1+j1)&1)? W_cos(index2,4*stride) : - W_cos(index2,4*stride);
         // b[0] = 3.3f;
         // b[1] = 3.4f;
     }
