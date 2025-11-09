@@ -44,7 +44,7 @@ int main() {
     test<64>();
     // test<256>();
     // test<1024>();
-    test<4096>();
+    // test<4096>();
 
     stat::set_title("FFT benchmark results");
     stat::print_table();

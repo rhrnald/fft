@@ -58,8 +58,8 @@ static inline PerfStat benchmark_perf(Kernel &&kernel, vec2_t<T> *d_data,
                                       int batch) {
     // return {0,0,0};
     static constexpr unsigned int inside_repeats = 1000;
-    static constexpr unsigned int kernel_runs = 1;
-    static constexpr unsigned int warm_up_runs = 1;
+    static constexpr unsigned int kernel_runs = 20;
+    static constexpr unsigned int warm_up_runs = 5;
 
     // R 회와 2R 회를 이용해 per-iteration kernel-only 시간 산출
     double t_R =
