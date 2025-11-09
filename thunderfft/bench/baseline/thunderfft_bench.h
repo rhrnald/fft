@@ -49,7 +49,7 @@ __global__ void ThunderFFT_kernel_ir<float,64,16>(
     __syncthreads();
 
     // repeat in shared memory
-    for (unsigned r = 0; r < inside_repeats; ++r) {
+    // for (unsigned r = 0; r < inside_repeats; ++r) {
         float reg[ept * 2];
         vec2_t<float>* reg2 = (vec2_t<float>*)reg;
 
@@ -61,16 +61,16 @@ __global__ void ThunderFFT_kernel_ir<float,64,16>(
 
         thunderfft::detail::unit::smem2reg(reg2, i_0, i_1, 1);
 
-        // for (unsigned r = 0; r < inside_repeats; ++r) {
+        for (unsigned r = 0; r < inside_repeats; ++r) {
             thunderfft::detail::unit::fft_kernel_r64_b16<true>(reg, dW);
-        // }
+        }
 
         auto *o_0 = (s_out+(laneid/4)*(N+4));
         auto *o_1 = (s_out+(laneid/4+8)*(N+4));
 
         thunderfft::detail::unit::reg2smem(reg2, o_0, o_1, 1);
         __syncthreads();
-    }
+    // }
 
     for (unsigned i = 0; i < batch_per_block; i++) {
         for(unsigned j=threadIdx.x; j<N; j+= blockDim.x) {
@@ -333,8 +333,8 @@ void thunderfft_benchmark(vec2_t<T>* h_input, float2* baseline,
     const dim3 grid ( batch  / batch_per_block );
     const dim3 block( threads_per_warp, warp_per_block );
 
-    // const size_t shmem_bytes = 2 * sizeof(T2) * (N+pad_h(N)) * batch_per_block;
-    const size_t shmem_bytes = 2 * sizeof(float2) * (N+pad_h(N)) * batch_per_block;
+    const size_t shmem_bytes = 2 * sizeof(T2) * (N+pad_h(N)) * batch_per_block;
+    // const size_t shmem_bytes = 2 * sizeof(float2) * (N+pad_h(N)) * batch_per_block;
 
     T* dW;
     CHECK_CUDA(cudaFuncSetAttribute(
