@@ -736,6 +736,6 @@ void thunderfft_benchmark_smem(vec2_t<T>* h_input, float2* baseline,
     //     CHECK_CUDA(cudaGetLastError());
     // };
 
-    benchmark_run<T, N, 4>(kernel, h_input, baseline, batch, "th_r");
+    benchmark_run<T, N, 4>(kernel, h_input, baseline, batch, "th_s");
     CHECK_CUDA(cudaStreamDestroy(stream));
 }
