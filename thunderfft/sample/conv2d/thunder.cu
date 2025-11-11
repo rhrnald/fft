@@ -1,3 +1,4 @@
+#include <cuda_runtime.h>
 #include <cufftdx.hpp>
 #include <cute/tensor.hpp>
 #include <thunderfft/thunderfft.cuh>
@@ -38,8 +39,6 @@ __global__ void convolution_kernel(cufftdx::complex<float> *d_input,
 {
     using complex_type = cufftdx::complex<float>;
 
-    static_assert(f == 33, "f must be 33");
-
     static constexpr unsigned int tile_size = 64;
     static constexpr unsigned int batch_per_warp = 16;
     static constexpr unsigned int warp_size = 32;
@@ -63,12 +62,12 @@ __global__ void convolution_kernel(cufftdx::complex<float> *d_input,
     auto smem_tensor_x = make_tensor(make_smem_ptr(tile), smem_layout_x);
     auto smem_tensor_y = make_tensor(make_smem_ptr(tile), smem_layout_y);
 
-    auto cta_coord = make_coord(blockIdx.x, blockIdx.y);
+    auto cta_coord = make_coord(blockIdx.y, blockIdx.x);
 
     auto input_tile_gmem_tensor = local_tile(input_gmem_tensor, input_cta_tiler, cta_coord);
     auto output_tile_gmem_tensor = local_tile(output_gmem_tensor, output_cta_tiler, cta_coord);
 
-    auto reg = make_tensor<cufftdx::complex<float>>(make_shape(Int<ept>{}), LayoutRight());
+    auto reg = make_tensor<cufftdx::complex<float>>(make_shape(Int<ept>{}));
 
     // gmem -> smem    
     int row_index, col_index, reversed_row_index, reversed_col_index;
@@ -83,7 +82,9 @@ __global__ void convolution_kernel(cufftdx::complex<float> *d_input,
         col_index = 32*j + lane_id;
         for (int i = 0; i < batch_per_warp; i++) {
             row_index = batch_per_warp*warp_id + i;
-            smem_tensor_x(row_index, col_index) = input_tile_gmem_tensor(row_index, col_index);
+            bool is_valid = blockIdx.y * valid_tile_size + row_index < N &&
+                            blockIdx.x * valid_tile_size + col_index < N;
+            smem_tensor_x(row_index, col_index) = is_valid ? input_tile_gmem_tensor(row_index, col_index) : complex_type(0.0f, 0.0f);
         }
     }
     
@@ -169,7 +170,6 @@ __global__ void convolution_kernel(cufftdx::complex<float> *d_input,
         smem_tensor_y(row_index, col_index) = reg(i);
         smem_tensor_y(row_index, col_index + batch_per_warp/2) = reg(i + ept/2);
     }
-
     __syncthreads();
 
     row_index = lane_id/4 + warp_id * batch_per_warp;
@@ -180,9 +180,10 @@ __global__ void convolution_kernel(cufftdx::complex<float> *d_input,
             reg(i) = smem_tensor_y(row_index, reversed_col_index);
             reg(i + ept/2) = smem_tensor_y(row_index + batch_per_warp/2, reversed_col_index);
         }
+    }
+    __syncthreads();
 
-        __syncthreads();
-
+    if (row_index < (valid_tile_size+batch_per_warp-1)/batch_per_warp*batch_per_warp) {
         thunderfft::detail::unit::fft_kernel_r64_b16<false>(reinterpret_cast<float*>(reg.data()), dW);
         
         // x-dim IFFT: reg -> smem
@@ -196,11 +197,15 @@ __global__ void convolution_kernel(cufftdx::complex<float> *d_input,
     __syncthreads();
 
     // smem -> gmem
-    if (row_index < valid_tile_size) {
-        int col_index = lane_id;
-        if (col_index < valid_tile_size) {
-            for (int i = 0; i < batch_per_warp; i++) {
-                row_index = i + warp_id * batch_per_warp;
+    col_index = threadIdx.x;
+    for (int j = 0; j < tile_size/warp_size; j++) {
+        col_index = 32*j + lane_id;
+        for (int i = 0; i < batch_per_warp; i++) {
+            row_index = i + warp_id * batch_per_warp;
+            bool is_valid = (blockIdx.y * valid_tile_size + row_index < output_size) &&
+                            (blockIdx.x * valid_tile_size + col_index < output_size) &&
+                            (row_index < valid_tile_size) && (col_index < valid_tile_size);
+            if (is_valid) {
                 output_tile_gmem_tensor(row_index, col_index) = smem_tensor_x(row_index, col_index);
             }
         }
@@ -251,8 +256,8 @@ void my_convolution(const float2* h_input, const float2* h_filter,
 
     auto input_gmem_layout = make_layout(
         make_shape(
-            make_shape(Int<tile_size>{}, gridSize.x), 
-            make_shape(Int<tile_size>{}, gridSize.y)
+            make_shape(Int<tile_size>{}, gridSize.y), 
+            make_shape(Int<tile_size>{}, gridSize.x)
         ), 
         make_stride(
             make_stride(N, valid_tile_size*N), 
@@ -262,8 +267,8 @@ void my_convolution(const float2* h_input, const float2* h_filter,
 
     auto output_gmem_layout = make_layout(
         make_shape(
-            make_shape(Int<valid_tile_size>{}, gridSize.x), 
-            make_shape(Int<valid_tile_size>{}, gridSize.y)
+            make_shape(Int<valid_tile_size>{}, gridSize.y), 
+            make_shape(Int<valid_tile_size>{}, gridSize.x)
         ),
         make_stride(
             make_stride(output_size, valid_tile_size*output_size),
@@ -316,4 +321,33 @@ void my_convolution(const float2* h_input, const float2* h_filter,
     CHECK_CUFFT(cufftDestroy(plan_forward));
 }
 
+// Template instantiations for odd filter sizes 3 to 33
+template void my_convolution<3>(const float2*, const float2*, float2*, int);
+template void my_convolution<5>(const float2*, const float2*, float2*, int);
+template void my_convolution<7>(const float2*, const float2*, float2*, int);
+template void my_convolution<9>(const float2*, const float2*, float2*, int);
+template void my_convolution<11>(const float2*, const float2*, float2*, int);
+template void my_convolution<13>(const float2*, const float2*, float2*, int);
+template void my_convolution<15>(const float2*, const float2*, float2*, int);
+template void my_convolution<17>(const float2*, const float2*, float2*, int);
+template void my_convolution<19>(const float2*, const float2*, float2*, int);
+template void my_convolution<21>(const float2*, const float2*, float2*, int);
+template void my_convolution<23>(const float2*, const float2*, float2*, int);
+template void my_convolution<25>(const float2*, const float2*, float2*, int);
+template void my_convolution<27>(const float2*, const float2*, float2*, int);
+template void my_convolution<29>(const float2*, const float2*, float2*, int);
+template void my_convolution<31>(const float2*, const float2*, float2*, int);
 template void my_convolution<33>(const float2*, const float2*, float2*, int);
+template void my_convolution<35>(const float2*, const float2*, float2*, int);
+template void my_convolution<37>(const float2*, const float2*, float2*, int);
+template void my_convolution<39>(const float2*, const float2*, float2*, int);
+template void my_convolution<41>(const float2*, const float2*, float2*, int);
+template void my_convolution<43>(const float2*, const float2*, float2*, int);
+template void my_convolution<45>(const float2*, const float2*, float2*, int);
+template void my_convolution<47>(const float2*, const float2*, float2*, int);
+template void my_convolution<49>(const float2*, const float2*, float2*, int);
+template void my_convolution<51>(const float2*, const float2*, float2*, int);
+template void my_convolution<53>(const float2*, const float2*, float2*, int);
+template void my_convolution<55>(const float2*, const float2*, float2*, int);
+template void my_convolution<57>(const float2*, const float2*, float2*, int);
+template void my_convolution<59>(const float2*, const float2*, float2*, int);

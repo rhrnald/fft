@@ -6,6 +6,8 @@
 #include <stdio.h>
 
 #include "../utils.h"
+// #include "cufftdx.cuh"
+// #include "thunder.cuh"
 
 // Forward declarations implemented in thunder.cu / cufftdx.cu
 template <int f>
@@ -179,44 +181,25 @@ static double linf_rel(const float2* a, const float2* b, size_t n) {
                           : static_cast<double>(max_diff);
 }
 
-int main(int argc, char** argv) {
-    int N = 16384;
-    int device = 0;
-    constexpr int F = 33;
-
-    if (argc >= 2) {
-        N = std::atoi(argv[1]);
-    }
-    if (argc >= 3) {
-        const int requested_f = std::atoi(argv[2]);
-        if (requested_f != F) {
-            std::cerr << "This sample currently supports filter size f = " << F
-                      << ". Requested f = " << requested_f << "\n";
-            return EXIT_FAILURE;
-        }
-    }
-    if (argc >= 4) {
-        device = std::atoi(argv[3]);
+// Helper function to dispatch to the correct template instantiation
+template <int f>
+void run_convolution_tests(int N, int device) {
+    if (N < f) {
+        std::cerr << "Input size N must be >= " << f << "\n";
+        return;
     }
 
-    if (N < F) {
-        std::cerr << "Input size N must be >= " << F << "\n";
-        return EXIT_FAILURE;
-    }
+    const int out_size = N - f + 1;
 
-    const int out_size = N - F + 1;
+    std::cout << "\n========================================\n";
+    std::cout << "Filter size: " << f << " x " << f << "\n";
+    std::cout << "  Input size : " << N << " x " << N << "\n";
+    std::cout << "  Output size: " << out_size << " x " << out_size << "\n";
+    std::cout << "========================================\n";
 
-    std::cout << "Convolution Benchmark: ThunderFFT vs cuFFTDx\n"
-              << "  Input size : " << N << " x " << N << "\n"
-              << "  Filter size: " << F << " x " << F << "\n"
-              << "  Output size: " << out_size << " x " << out_size << "\n"
-              << "  Device     : " << device << "\n";
-
-    CHECK_CUDA(cudaSetDevice(device));
-
-    const size_t input_bytes = sizeof(float2) * static_cast<size_t>(N) * N;
-    const size_t filter_bytes = sizeof(float2) * static_cast<size_t>(F) * F;
-    const size_t output_bytes = sizeof(float2) * static_cast<size_t>(out_size) * out_size;
+    const size_t input_bytes = sizeof(float2) * N * N;
+    const size_t filter_bytes = sizeof(float2) * f * f;
+    const size_t output_bytes = sizeof(float2) * out_size * out_size;
 
     float2* h_input = static_cast<float2*>(std::malloc(input_bytes));
     float2* h_filter = static_cast<float2*>(std::malloc(filter_bytes));
@@ -225,29 +208,29 @@ int main(int argc, char** argv) {
     float2* h_output_ref = static_cast<float2*>(std::malloc(output_bytes));
 
     if (!h_input || !h_filter || !h_output_thunder || !h_output_cufftdx || !h_output_ref) {
-        std::fprintf(stderr, "Host allocation failed\n");
+        std::fprintf(stderr, "Host allocation failed for filter size %d\n", f);
         std::free(h_input);
         std::free(h_filter);
         std::free(h_output_thunder);
         std::free(h_output_cufftdx);
         std::free(h_output_ref);
-        return EXIT_FAILURE;
+        return;
     }
 
     make_test_input_random(h_input, N);
-    make_test_filter_random(h_filter, F);
+    make_test_filter_random(h_filter, f);
 
     std::cout << "\n--- Running ThunderFFT convolution ---\n";
-    my_convolution<F>(h_input, h_filter, h_output_thunder, N);
+    my_convolution<f>(h_input, h_filter, h_output_thunder, N);
 
     std::cout << "\n--- Running cuFFTDx convolution ---\n";
-    cufftdx_convolution<F>(h_input, h_filter, h_output_cufftdx, N);
+    cufftdx_convolution<f>(h_input, h_filter, h_output_cufftdx, N);
 
     std::cout << "\n--- Running cuFFT reference convolution (validation) ---\n";
-    reference_convolution_cufft(h_input, h_filter, h_output_ref, N, F);
+    reference_convolution_cufft(h_input, h_filter, h_output_ref, N, f);
     std::cout << "[cuFFT] Validation run complete." << std::endl;
 
-    const size_t output_count = static_cast<size_t>(out_size) * out_size;
+    const size_t output_count = out_size * out_size;
     std::cout << std::fixed << std::setprecision(6);
 
     std::cout << "\n--- Validation vs cuFFT reference ---\n";
@@ -261,29 +244,91 @@ int main(int argc, char** argv) {
     std::cout << "L2 rel. error  (cuFFTDx vs cuFFT)  : " << cufftdx_l2 << "\n";
     std::cout << "Linf rel. error (cuFFTDx vs cuFFT) : " << cufftdx_linf << "\n";
 
-    const int to_print = std::min(8, out_size);  // limit for readability
-    std::cout << "\nFirst " << to_print << " x " << to_print << " samples:\n";
-    std::cout << "  i  j     Thunder(real)  Thunder(imag)  cuFFTDx(real)  cuFFTDx(imag)"
-                 "  cuFFT(real)   cuFFT(imag)\n";
-    for (int i = 0; i < to_print; ++i) {
-        for (int j = 0; j < to_print; ++j) {
-            const int idx = i * out_size + j;
-            std::cout << std::setw(3) << i << " " << std::setw(3) << j
-                      << " " << std::setw(13) << h_output_thunder[idx].x
-                      << " " << std::setw(13) << h_output_thunder[idx].y
-                      << " " << std::setw(13) << h_output_cufftdx[idx].x
-                      << " " << std::setw(13) << h_output_cufftdx[idx].y
-                      << " " << std::setw(13) << h_output_ref[idx].x
-                      << " " << std::setw(13) << h_output_ref[idx].y << "\n";
-        }
-    }
-
     std::free(h_input);
     std::free(h_filter);
     std::free(h_output_thunder);
     std::free(h_output_cufftdx);
     std::free(h_output_ref);
+}
 
-    std::cout << "\nDone." << std::endl;
+// Dispatch function to call the correct template instantiation
+void dispatch_convolution_tests(int f, int N, int device) {
+    switch (f) {
+        case 3: run_convolution_tests<3>(N, device); break;
+        case 5: run_convolution_tests<5>(N, device); break;
+        case 7: run_convolution_tests<7>(N, device); break;
+        case 9: run_convolution_tests<9>(N, device); break;
+        case 11: run_convolution_tests<11>(N, device); break;
+        case 13: run_convolution_tests<13>(N, device); break;
+        case 15: run_convolution_tests<15>(N, device); break;
+        case 17: run_convolution_tests<17>(N, device); break;
+        case 19: run_convolution_tests<19>(N, device); break;
+        case 21: run_convolution_tests<21>(N, device); break;
+        case 23: run_convolution_tests<23>(N, device); break;
+        case 25: run_convolution_tests<25>(N, device); break;
+        case 27: run_convolution_tests<27>(N, device); break;
+        case 29: run_convolution_tests<29>(N, device); break;
+        case 31: run_convolution_tests<31>(N, device); break;
+        case 33: run_convolution_tests<33>(N, device); break;
+        case 35: run_convolution_tests<35>(N, device); break;
+        case 37: run_convolution_tests<37>(N, device); break;
+        case 39: run_convolution_tests<39>(N, device); break;
+        case 41: run_convolution_tests<41>(N, device); break;
+        case 43: run_convolution_tests<43>(N, device); break;
+        case 45: run_convolution_tests<45>(N, device); break;
+        case 47: run_convolution_tests<47>(N, device); break;
+        case 49: run_convolution_tests<49>(N, device); break;
+        case 51: run_convolution_tests<51>(N, device); break;
+        case 53: run_convolution_tests<53>(N, device); break;
+        case 55: run_convolution_tests<55>(N, device); break;
+        case 57: run_convolution_tests<57>(N, device); break;
+        case 59: run_convolution_tests<59>(N, device); break;
+        default:
+            std::cerr << "Unsupported filter size: " << f << "\n";
+            std::cerr << "Supported filter sizes: 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 41, 43, 45, 47, 49, 51, 53, 55, 57, 59 (odd numbers only)\n";
+            break;
+    }
+}
+
+int main(int argc, char** argv) {
+    int N = 16384;
+    int device = 0;
+    int min_filter_size = 3;
+    int max_filter_size = 59;
+
+    if (argc >= 2) {
+        N = std::atoi(argv[1]);
+    }
+    if (argc >= 3) {
+        const int single_filter_size = std::atoi(argv[2]);
+        if (single_filter_size % 2 == 0) {
+            std::cerr << "Error: Filter size must be odd. Got: " << single_filter_size << "\n";
+            return EXIT_FAILURE;
+        }
+        min_filter_size = single_filter_size;
+        max_filter_size = single_filter_size;
+    }
+    if (argc >= 4) {
+        device = std::atoi(argv[3]);
+    }
+
+    std::cout << "Convolution Benchmark: ThunderFFT vs cuFFTDx\n"
+              << "  Input size : " << N << " x " << N << "\n"
+              << "  Filter sizes: " << min_filter_size << " to " << max_filter_size << " (odd numbers only)\n"
+              << "  Device     : " << device << "\n";
+
+    CHECK_CUDA(cudaSetDevice(device));
+
+    // Test each odd filter size from min to max
+    for (int f = min_filter_size; f <= max_filter_size; f += 2) {
+        if (N < f) {
+            std::cerr << "Skipping filter size " << f << " (N=" << N << " < f=" << f << ")\n";
+            continue;
+        }
+        dispatch_convolution_tests(f, N, device);
+    }
+
+    std::cout << "\n========================================\n";
+    std::cout << "All tests completed." << std::endl;
     return 0;
 }
