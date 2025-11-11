@@ -24,6 +24,6 @@ set_target_properties(benchmark PROPERTIES
 
 # 공통 최적화 옵션
 target_compile_options(benchmark PRIVATE
-  $<$<COMPILE_LANGUAGE:CUDA>:-O3 --use_fast_math>
+  $<$<COMPILE_LANGUAGE:CUDA>:-O3 --use_fast_math -lineinfo>
   $<$<COMPILE_LANGUAGE:CXX>:-O3>
 )

@@ -30,6 +30,9 @@ template <long long N> int test() {
     
     thunderfft_benchmark<half, N>(h_input_half, h_output, batch);
     thunderfft_benchmark<float, N>(h_input, h_output, batch);
+
+    thunderfft_benchmark_smem<half, N>(h_input_half, h_output, batch);
+    thunderfft_benchmark_smem<float, N>(h_input, h_output, batch);
     // for(int i=0; i<4096; i++) {
     //     printf("%f %f\n", h_output[i].x, h_output[i].y);
     // }

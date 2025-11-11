@@ -70,7 +70,7 @@ static inline PerfStat benchmark_perf(Kernel &&kernel, vec2_t<T> *d_data,
 
     double comp_ms = (t_2R - t_R) / static_cast<double>(inside_repeats);
 
-    double e2e_ms = measure_execution_ms(kernel, warm_up_runs, kernel_runs, 1);
+    double e2e_ms = measure_execution_ms(kernel, 1, 1, 1);
 
     double comm_ms = measure_execution_ms(kernel, warm_up_runs, kernel_runs, 0);
 
@@ -99,6 +99,8 @@ void benchmark_run(Kernel &&kernel, vec2_t<T> *h_data, float2 *baseline,
     CHECK_CUDA(cudaMalloc(&d_custom, sizeof(T2) * N * B));
     CHECK_CUDA(cudaMemcpy(d_custom, h_data, sizeof(T2) * N * B,
                           cudaMemcpyHostToDevice));
+
+    CHECK_CUDA(cudaDeviceSynchronize());
 
     auto kernel_wrapper = [&kernel, d_custom, B](unsigned int inside_repeats) {
         kernel(d_custom, inside_repeats);
