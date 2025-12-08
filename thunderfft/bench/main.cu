@@ -29,11 +29,11 @@ template <long long N> int test() {
     // fft_tc_sm_benchmark<N>(h_input, h_input_half, h_output, batch);
     
     thunderfft_benchmark<half, N>(h_input_half, h_output, batch);
-    thunderfft_benchmark<float, N>(h_input, h_output, batch);
+    // thunderfft_benchmark<float, N>(h_input, h_output, batch);
 
-    thunderfft_benchmark_smem<half, N>(h_input_half, h_output, batch);
-    thunderfft_benchmark_smem<float, N>(h_input, h_output, batch);
-    // for(int i=0; i<4096; i++) {
+    // thunderfft_benchmark_smem<half, N>(h_input_half, h_output, batch);
+    // thunderfft_benchmark_smem<float, N>(h_input, h_output, batch);
+    // for(int i=0; i<256; i++) {
     //     printf("%f %f\n", h_output[i].x, h_output[i].y);
     // }
 
@@ -44,10 +44,10 @@ template <long long N> int test() {
 }
 
 int main() {
-    test<64>();
-    // test<256>();
+    // test<64>();
+    test<256>();
     // test<1024>();
-    test<4096>();
+    // test<4096>();
 
     stat::set_title("FFT benchmark results");
     stat::print_table();

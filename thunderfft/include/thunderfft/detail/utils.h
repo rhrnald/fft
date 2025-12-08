@@ -115,6 +115,30 @@ __device__ __forceinline__ half2 cmul(half2 a, float2 w) {
     return __floats2half2_rn(rx, ry);
 }
 
+__device__ __forceinline__ half2 cmul(half2 a, half2 b) {
+    // a = (ax, ay)
+    // b = (bx, by)
+
+    // swap(a) = (ay, ax)
+    half2 a_swapped = __halves2half2(__high2half(a), __low2half(a));
+
+    // Element-wise multiply
+    // p1 = (ax*bx, ay*by)
+    half2 p1 = __hmul2(a, b);
+
+    // p2 = (ay*bx, ax*by)
+    half2 p2 = __hmul2(a_swapped, b);
+
+    // real = ax*bx - ay*by  → (p1.x - p1.y)
+    half real = __hsub(__low2half(p1), __high2half(p1));
+
+    // imag = ay*bx + ax*by  → (p2.x + p2.y)
+    half imag = __hadd(__low2half(p2), __high2half(p2));
+
+    return __halves2half2(real, imag);
+}
+
+
 template <typename T> inline float2 to_float2(const T &v);
 
 template <> inline float2 to_float2<float2>(const float2 &v) { return v; }
@@ -136,7 +160,6 @@ float check_max_abs_err(const float2 *ref, const T *test, int N) {
             max_abs_err = abs_err;
     }
 
-    // 요구사항: "maximum absolute error만 출력"
     return max_abs_err;
 }
 

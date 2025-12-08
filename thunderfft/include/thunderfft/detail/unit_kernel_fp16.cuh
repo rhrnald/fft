@@ -63,8 +63,8 @@ __device__ __forceinline__ void fill_reg_b(half2 b[], int stride_log2, int strid
         // b[1] = W_cos(index2,4*stride) * (1-2*((i1+j1)&1));
         // b[0] = ((i0+j0)&1)? W_cos(index1,4*stride) : - W_cos(index1,4*stride);
         // b[1] = ((i1+j1)&1)? W_cos(index2,4*stride) : - W_cos(index2,4*stride);
-        b[0] = make_half2(((i0+j0)&1)? W_cos(index1,4*stride) : - W_cos(index1,4*stride),
-                          ((i1+j1)&1)? W_cos(index2,4*stride) : - W_cos(index2,4*stride));
+        b[0] = make_half2(((i0+j0)&1)? -W_cos(index1,4*stride) : W_cos(index1,4*stride),
+                          ((i1+j1)&1)? -W_cos(index2,4*stride) : W_cos(index2,4*stride));
     }
 
     // b[0] = W_ptr[(index1 & (4 * stride - 1)) * (16 / stride)].x;
@@ -133,6 +133,237 @@ __device__ void fft_kernel_r64_b16(vec2_t<half>* reg, unsigned int* W)
     constexpr int radix     = tc_k / 2;    // 4
     constexpr int iter      = 3;
     constexpr int n         = 64;          // 4^3
+    constexpr int ept       = (n * tc_m) / warp_size; // element-per-thread (if needed)
+
+    half2 reg_frag_zero[tc_m * tc_n / warp_size / 2];
+    for (int i = 0; i < tc_m * tc_n / warp_size / 2; i++)
+        reg_frag_zero[i] = make_half2(0, 0);
+
+    const int laneid = threadIdx.x % warp_size;
+
+    W--;
+
+    // #pragma unroll
+    for (int i = 0; i < iter; ++i) {
+        const int stride = 1 << (i << 1); // 4^i
+
+        half2 reg_frag_b[tc_k * tc_n / warp_size / 2];
+        // unsigned int *reg_frag_b = W-1;
+        #pragma unroll
+        for (int _j = 0; _j < n / radix; ++_j) {
+            int j = (_j%4 ) * 4 + _j/4;
+            half2 reg_frag_a[tc_m * tc_k / warp_size/2];
+            half2 reg_frag_d[tc_m * tc_n / warp_size/2];
+
+            // reg_frag_a[0] = reg[j * 2];
+            // reg_frag_a[1] = reg[j * 2 + 2 * n / radix];
+            // reg_frag_a[2] = reg[j * 2 + 1];
+            // reg_frag_a[3] = reg[j * 2 + 1 + 2 * n / radix];
+            // reg_frag_a[0].x = reg[j].x;
+            // reg_frag_a[0].y = reg[j + n / radix].x;
+            // reg_frag_a[1].x = reg[j].y;
+            // reg_frag_a[1].y = reg[j + n / radix].y;
+            reg_frag_a[0] = reg[j];
+            reg_frag_a[1] = reg[j + n / radix];
+            
+
+    //         // twiddle/permutation indices
+            const int j_perm = (stride >= radix)
+                                 ? ((j / (stride / radix)) / 2 * 2) % radix
+                                 : 0;
+            const int i_perm = ((j / stride) / 2 * 2) % radix;
+            const int k      = j % stride;
+
+            // if( _j % ( 1<< (2-i)) == 0)
+            //     reg_frag_b++;
+            if( _j % ( 1<< (2-i)) == 0) {
+                // fill_reg_b<forward>(reg_frag_b, i * 2, stride, i_perm, j_perm, k, i);
+                W++;
+            }
+
+            auto reg_frag_b = W;
+
+            mma_m16n8k8_fp16_fp16_rowcol(
+                (unsigned int *)reg_frag_d, (unsigned int *)reg_frag_a,
+                (unsigned int *)reg_frag_b, (unsigned int *)reg_frag_zero);
+
+            // reg[j * 2]                                     = reg_frag_d[0];
+            // reg[j * 2 + 1]                                 = reg_frag_d[1];
+            // reg[j * 2 + 2 * n / radix]                     = reg_frag_d[2];
+            // reg[j * 2 + 1 + 2 * n / radix]                 = reg_frag_d[3];
+            reg[j] = reg_frag_d[0];
+            reg[j + n / radix] = reg_frag_d[1];
+        }
+
+        if (i < iter - 1) {
+            // tc_k == 8 iterations
+            // for (int jk = 0; jk < tc_k; ++jk) {
+            //     const int j = (jk / stride) * (radix * stride); // 4*stride
+            //     const int k = jk % stride;
+            //     permute_radix4_tmp(
+            //         reg[2 * (k + j)],                  reg[2 * (k + j) + 1],
+            //         reg[2 * (k + j + stride)],         reg[2 * (k + j + stride) + 1],
+            //         reg[2 * (k + j + stride * 2)],     reg[2 * (k + j + stride * 2) + 1],
+            //         reg[2 * (k + j + stride * 3)],     reg[2 * (k + j + stride * 3) + 1],
+            //         laneid & 3);
+            // }
+            for (int jk = 0; jk < 8; jk++) {
+                int j = (jk / stride) * (4 * stride);
+                int k = jk % stride;
+
+                // int pattern = laneid & 3;
+                // if(pattern==1 || pattern==3) {
+                //     swap_inline(reg[k+j], reg[k+j+stride*2]);
+                //     swap_inline(reg[k+j+stride], reg[k+j+stride*3]);
+                // }
+                // swap_inline(reg[k + j].y, reg[k + j + stride].x);
+                // swap_inline(reg[k + j + stride * 2].y, reg[k + j + stride * 3].x);
+                permute_radix4_tmp(
+                    reg[k + j].x, reg[k + j].y, reg[k + j + stride].x,
+                    reg[k + j + stride].y, reg[k + j + stride * 2].x,
+                    reg[k + j + stride * 2].y, reg[k + j + stride * 3].x,
+                    reg[k + j + stride * 3].y, laneid & 3);
+            }
+        }
+    }
+}
+template <typename T> __device__ void swap_vals(T &a, T &b) {
+    T tmp = a;
+    a = b;
+    b = tmp;
+}
+
+template <typename T> __device__ void swap_thread_data(T *thread_data) {
+    swap_vals(thread_data[1], thread_data[4]);
+    swap_vals(thread_data[17], thread_data[20]);
+    swap_vals(thread_data[2], thread_data[8]);
+    swap_vals(thread_data[18], thread_data[24]);
+    swap_vals(thread_data[3], thread_data[12]);
+    swap_vals(thread_data[19], thread_data[28]);
+    swap_vals(thread_data[6], thread_data[9]);
+    swap_vals(thread_data[22], thread_data[25]);
+    swap_vals(thread_data[7], thread_data[13]);
+    swap_vals(thread_data[23], thread_data[29]);
+    swap_vals(thread_data[11], thread_data[14]);
+    swap_vals(thread_data[27], thread_data[30]);
+}
+
+template <bool forward>
+__device__ void fft_kernel_r64_b16_fuse(vec2_t<half>* reg, unsigned int* W)
+{
+    // compile-time constants (function-local)
+    constexpr int tc_m      = 16;
+    constexpr int tc_n      = 8;
+    constexpr int tc_k      = 8;
+    constexpr int radix     = tc_k / 2;    // 4
+    constexpr int iter      = 3;
+    constexpr int n         = 64;          // 4^3
+    constexpr int ept       = (n * tc_m) / warp_size; // element-per-thread (if needed)
+
+    swap_thread_data(reg);
+    half2 reg_frag_zero[tc_m * tc_n / warp_size / 2];
+    for (int i = 0; i < tc_m * tc_n / warp_size / 2; i++)
+        reg_frag_zero[i] = make_half2(0, 0);
+
+    const int laneid = threadIdx.x % warp_size;
+
+    W--;
+
+    // #pragma unroll
+    for (int i = 0; i < iter; ++i) {
+        const int stride = 1 << (i << 1); // 4^i
+
+        half2 reg_frag_b[tc_k * tc_n / warp_size / 2];
+        // unsigned int *reg_frag_b = W-1;
+        #pragma unroll
+        for (int _j = 0; _j < n / radix; ++_j) {
+            int j = (_j%4 ) * 4 + _j/4;
+            half2 reg_frag_a[tc_m * tc_k / warp_size/2];
+            half2 reg_frag_d[tc_m * tc_n / warp_size/2];
+
+            // reg_frag_a[0] = reg[j * 2];
+            // reg_frag_a[1] = reg[j * 2 + 2 * n / radix];
+            // reg_frag_a[2] = reg[j * 2 + 1];
+            // reg_frag_a[3] = reg[j * 2 + 1 + 2 * n / radix];
+            // reg_frag_a[0].x = reg[j].x;
+            // reg_frag_a[0].y = reg[j + n / radix].x;
+            // reg_frag_a[1].x = reg[j].y;
+            // reg_frag_a[1].y = reg[j + n / radix].y;
+            reg_frag_a[0] = reg[j];
+            reg_frag_a[1] = reg[j + n / radix];
+            
+
+    //         // twiddle/permutation indices
+            const int j_perm = (stride >= radix)
+                                 ? ((j / (stride / radix)) / 2 * 2) % radix
+                                 : 0;
+            const int i_perm = ((j / stride) / 2 * 2) % radix;
+            const int k      = j % stride;
+
+            // if( _j % ( 1<< (2-i)) == 0)
+            //     reg_frag_b++;
+            if( _j % ( 1<< (2-i)) == 0) {
+                // fill_reg_b<forward>(reg_frag_b, i * 2, stride, i_perm, j_perm, k, i);
+                W++;
+            }
+
+            auto reg_frag_b = W;
+
+            mma_m16n8k8_fp16_fp16_rowcol(
+                (unsigned int *)reg_frag_d, (unsigned int *)reg_frag_a,
+                (unsigned int *)reg_frag_b, (unsigned int *)reg_frag_zero);
+
+            // reg[j * 2]                                     = reg_frag_d[0];
+            // reg[j * 2 + 1]                                 = reg_frag_d[1];
+            // reg[j * 2 + 2 * n / radix]                     = reg_frag_d[2];
+            // reg[j * 2 + 1 + 2 * n / radix]                 = reg_frag_d[3];
+            reg[j] = reg_frag_d[0];
+            reg[j + n / radix] = reg_frag_d[1];
+        }
+
+        if (i < iter - 1) {
+            // tc_k == 8 iterations
+            // for (int jk = 0; jk < tc_k; ++jk) {
+            //     const int j = (jk / stride) * (radix * stride); // 4*stride
+            //     const int k = jk % stride;
+            //     permute_radix4_tmp(
+            //         reg[2 * (k + j)],                  reg[2 * (k + j) + 1],
+            //         reg[2 * (k + j + stride)],         reg[2 * (k + j + stride) + 1],
+            //         reg[2 * (k + j + stride * 2)],     reg[2 * (k + j + stride * 2) + 1],
+            //         reg[2 * (k + j + stride * 3)],     reg[2 * (k + j + stride * 3) + 1],
+            //         laneid & 3);
+            // }
+            for (int jk = 0; jk < 8; jk++) {
+                int j = (jk / stride) * (4 * stride);
+                int k = jk % stride;
+
+                // int pattern = laneid & 3;
+                // if(pattern==1 || pattern==3) {
+                //     swap_inline(reg[k+j], reg[k+j+stride*2]);
+                //     swap_inline(reg[k+j+stride], reg[k+j+stride*3]);
+                // }
+                // swap_inline(reg[k + j].y, reg[k + j + stride].x);
+                // swap_inline(reg[k + j + stride * 2].y, reg[k + j + stride * 3].x);
+                permute_radix4_tmp(
+                    reg[k + j].x, reg[k + j].y, reg[k + j + stride].x,
+                    reg[k + j + stride].y, reg[k + j + stride * 2].x,
+                    reg[k + j + stride * 2].y, reg[k + j + stride * 3].x,
+                    reg[k + j + stride * 3].y, laneid & 3);
+            }
+        }
+    }
+}
+
+template <bool forward>
+__device__ void fft_kernel_r16_b16(vec2_t<half>* reg, unsigned int* W)
+{
+    // compile-time constants (function-local)
+    constexpr int tc_m      = 16;
+    constexpr int tc_n      = 8;
+    constexpr int tc_k      = 8;
+    constexpr int radix     = tc_k / 2;    // 4
+    constexpr int iter      = 2;
+    constexpr int n         = 16;          // 4^3
     constexpr int ept       = (n * tc_m) / warp_size; // element-per-thread (if needed)
 
     half2 reg_frag_zero[tc_m * tc_n / warp_size / 2];

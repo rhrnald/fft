@@ -26,7 +26,6 @@
     } while (0)
 
 void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch) {
-    printf("running cufft (type=float, N=%d, batch=%d)\n", N, batch);
     static constexpr unsigned int kernel_runs = 1;
     static constexpr unsigned int warm_up_runs = 1;
 
