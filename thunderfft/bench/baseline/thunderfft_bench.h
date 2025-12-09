@@ -465,10 +465,16 @@ void thunderfft_benchmark(vec2_t<T>* h_input, float2* baseline,
     cudaStream_t stream;
     CHECK_CUDA(cudaStreamCreate(&stream));
 
-    constexpr unsigned batch_per_block  = (N <= 512u ? 16u : 1u);
+    constexpr unsigned batch_per_block  =
+        (N == 64) ? 16 :
+        (N == 128) ? 8 :
+        (N == 256) ? 16 :
+        (N == 1024 || N == 4096) ? 1 :
+        -1;
+
     constexpr unsigned threads_per_warp = 32;
     constexpr unsigned warp_per_block =
-        (N == 64  || N == 1024) ? 1 :
+        (N == 64  || N == 128 || N == 1024) ? 1 :
         (N == 256 || N == 4096) ? 4 :
         -1;
 
@@ -764,10 +770,16 @@ void thunderfft_benchmark_smem(vec2_t<T>* h_input, float2* baseline,
     cudaStream_t stream;
     CHECK_CUDA(cudaStreamCreate(&stream));
 
-    constexpr unsigned batch_per_block  = (N <= 512u ? 16u : 1u);
+    constexpr unsigned batch_per_block  =
+        (N == 64) ? 16 :
+        (N == 128) ? 8 :
+        (N == 256) ? 16 :
+        (N == 1024 || N == 4096) ? 1 :
+        -1;
+
     constexpr unsigned threads_per_warp = 32;
     constexpr unsigned warp_per_block =
-        (N == 64  || N == 1024) ? 1 :
+        (N == 64  || N == 128 || N == 1024) ? 1 :
         (N == 256 || N == 4096) ? 4 :
         -1;
 

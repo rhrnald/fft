@@ -45,7 +45,8 @@ template <long long N> int test() {
 
 int main() {
     // test<64>();
-    test<256>();
+    test<128>();
+    // test<256>();
     // test<1024>();
     // test<4096>();
 

@@ -89,6 +89,7 @@ __global__ void ThunderFFT_kernel_ir<half,64,16>(
     }
 }
 
+#include "thunderfft_bench_half_128.h"
 #include "thunderfft_bench_half_256.h"
 
 
