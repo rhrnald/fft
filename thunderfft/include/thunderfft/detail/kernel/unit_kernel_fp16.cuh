@@ -1,4 +1,4 @@
-namespace thunderfft::detail::unit_fp16 {
+namespace thunderfft::unit_fp16 {
 
 static constexpr int warp_size = 32;
 
@@ -10,9 +10,6 @@ __device__ __forceinline__ int f(int x) {
     return (x % 2)*4+(x/2);
 }
 
-template <bool forward>
-__device__ __forceinline__ void make_reg_b(unsigned int W) {
-}
 
 template <bool forward>
 __device__ __forceinline__ void fill_reg_b(half2 b[], int stride_log2, int stride, int i_perm,
@@ -124,7 +121,7 @@ static __device__ void mma_m16n8k8_fp16_fp16_rowcol(unsigned int d[2],
 }
 
 template <bool forward>
-__device__ void fft_kernel_r64_b16(vec2_t<half>* reg, unsigned int* W)
+__device__ void fft_kernel_r64_b16(vec2_t<half>* reg)
 {
     // compile-time constants (function-local)
     constexpr int tc_m      = 16;
@@ -141,6 +138,7 @@ __device__ void fft_kernel_r64_b16(vec2_t<half>* reg, unsigned int* W)
 
     const int laneid = threadIdx.x % warp_size;
 
+    half2* W ;//= ThunderFFT_get_unit_twiddle_half2();
     W--;
 
     // #pragma unroll

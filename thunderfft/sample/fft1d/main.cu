@@ -72,9 +72,9 @@ static double linf_rel(const float2* a, const float2* b, size_t n) {
 
 int main(int /*argc*/, char** /*argv*/) {
     // Compile-time N for ThunderFFT template
-    constexpr unsigned N = 4096;
+    constexpr unsigned N = 64;
 
-    unsigned batch = 65536; // adjust as you like
+    unsigned batch = 65536;
     int device     = 0;
 
     CHECK_CUDA(cudaSetDevice(device));
@@ -113,7 +113,7 @@ int main(int /*argc*/, char** /*argv*/) {
     const unsigned int warm_up_runs = 1;
     const unsigned int runs = 5;
     const float ms_tf = measure_execution_ms(
-        [&]() { thunderfft::ThunderFFT<float, N>(d_in, d_out, batch, /*stream=*/0); },
+        [&]() { thunderfft::ThunderFFT_global<float, N, true>(d_in, d_out, batch, /*stream=*/0); },
         warm_up_runs,
         runs);
 

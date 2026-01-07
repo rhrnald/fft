@@ -7,9 +7,10 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Architectures (e.g., "80;90")
 set(THUNDERFFT_ARCHS "80" CACHE STRING "CUDA SM architectures")
@@ -29,5 +30,5 @@ target_link_libraries(thunderfft INTERFACE CUDA::cudart)
 target_compile_features(thunderfft INTERFACE cxx_std_17)
 
 # Subdirs
-# add_subdirectory(sample)
-add_subdirectory(bench)
+add_subdirectory(sample)
+#add_subdirectory(bench)
