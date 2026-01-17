@@ -94,10 +94,17 @@ __device__ __forceinline__ void make_reg_b(vec2_t<half> *W) {
     }
 }
 
-template <bool forward>
+template <int N, bool forward>
 __device__ __forceinline__ void make_reg_b_precompute(vec2_t<half> *W) {
     auto twiddle = ThunderFFT_get_unit_twiddle_half2();
-    for(int i=0; i<28; i++) W[i] = twiddle[(threadIdx.x%32) + 32*i];
+
+    if(!forward) twiddle += 32*36;
+
+    if constexpr (N==64) {
+        for(int i=0; i<28; i++) W[i] = twiddle[(threadIdx.x%32) + 32*i];
+    } else if constexpr (N==1024) {
+        for(int i=0; i<36; i++) W[i] = twiddle[(threadIdx.x%32) + 32*i];
+    }
 }
 
 template <typename T>
@@ -355,9 +362,8 @@ __device__ void fft_kernel_r64_b16_fuse(vec2_t<half>* reg, unsigned int* W)
         }
     }
 }
-
 template <bool forward>
-__device__ void fft_kernel_r16_b16(vec2_t<half>* reg, unsigned int* W)
+__device__ void fft_kernel_r16_b64(vec2_t<half>* reg, vec2_t<half>* W)
 {
     // compile-time constants (function-local)
     constexpr int tc_m      = 16;
@@ -365,7 +371,7 @@ __device__ void fft_kernel_r16_b16(vec2_t<half>* reg, unsigned int* W)
     constexpr int tc_k      = 8;
     constexpr int radix     = tc_k / 2;    // 4
     constexpr int iter      = 2;
-    constexpr int n         = 16;          // 4^3
+    constexpr int n         = 64;          // 4^3
     constexpr int ept       = (n * tc_m) / warp_size; // element-per-thread (if needed)
 
     half2 reg_frag_zero[tc_m * tc_n / warp_size / 2];
@@ -375,7 +381,6 @@ __device__ void fft_kernel_r16_b16(vec2_t<half>* reg, unsigned int* W)
     const int laneid = threadIdx.x % warp_size;
 
     W--;
-
     // #pragma unroll
     for (int i = 0; i < iter; ++i) {
         const int stride = 1 << (i << 1); // 4^i
@@ -404,17 +409,28 @@ __device__ void fft_kernel_r16_b16(vec2_t<half>* reg, unsigned int* W)
             const int j_perm = (stride >= radix)
                                  ? ((j / (stride / radix)) / 2 * 2) % radix
                                  : 0;
-            const int i_perm = ((j / stride) / 2 * 2) % radix;
+            const int i_perm = i==0? ((j / stride) / 2 * 2) % radix : 0;
             const int k      = j % stride;
 
             // if( _j % ( 1<< (2-i)) == 0)
             //     reg_frag_b++;
             if( _j % ( 1<< (2-i)) == 0) {
-                // fill_reg_b<forward>(reg_frag_b, i * 2, stride, i_perm, j_perm, k, i);
+                // fill_reg_b<forward>(reg_frag_b, i * 2, stride, i_perm, j_perm, k, i*2);
                 W++;
-            }
 
-            auto reg_frag_b = W;
+                // if(threadIdx.x<32 && blockIdx.x==0) {
+                //     float a1 = __half2float(reg_frag_b[0].x);
+                //     float a2 = __half2float(reg_frag_b[0].y);
+                //     float b1 = __half2float(W[0].x);
+                //     float b2 = __half2float(W[0].y);
+
+                //     if(abs(a1-b1)>1e-5 || abs(a2-b2) >1e-5)
+                //         printf("%d %d %d %f %f %f %f\n", threadIdx.x, i, _j, a1, a2, b1, b2);
+                // }
+            }
+            __syncthreads();
+
+            auto reg_frag_b = (unsigned int *)W;
 
             mma_m16n8k8_fp16_fp16_rowcol(
                 (unsigned int *)reg_frag_d, (unsigned int *)reg_frag_a,
@@ -458,6 +474,7 @@ __device__ void fft_kernel_r16_b16(vec2_t<half>* reg, unsigned int* W)
                     reg[k + j + stride * 3].y, laneid & 3);
             }
         }
+        W+=24;
     }
 }
 

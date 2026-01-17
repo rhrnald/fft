@@ -11,15 +11,10 @@ ThunderFFT_kernel_reg<float, 1024, 1, true>(vec2_t<float>* __restrict__ reg, vec
 
     thunderfft::unit::fft_kernel_r64_b16<true>((float*) reg);
 
-    __syncthreads();
-
     using L_in = layout_t<64, 16, 1, 64, 16, 1, false>;
     ThunderFFT_reg2smem_N64<float, L_in>(smem, reg);
 
     __syncthreads();
-
-    // using L_out = layout_t<64, 16, 16, 1, 16, 1, true>;
-    // ThunderFFT_smem2reg_N64<float, L_out>(reg, smem);
 
     for(int i=0; i<ept/2; i++) {
         int row = i%4 * 4 + (laneid%4);
@@ -37,39 +32,8 @@ ThunderFFT_kernel_reg<float, 1024, 1, true>(vec2_t<float>* __restrict__ reg, vec
         reg[i] = cmul(reg[i], W(col0 * rev_row, 1024));
         reg[i+ept/2] = cmul(reg[i+ept/2], W(col1 * rev_row, 1024));
     }
-    __syncthreads();
-
-    
-    // for(int i=0; i<ept/2; i++) {
-    //     int row = i%4 + (laneid%4)*4;
-    //     row = reverse_bit_groups<2,4>(row);
-
-    //     int col0 = laneid/4 + (i/4) * 16;
-    //     int col1 = col0 + 8;
-    //     reg[i] = cmul(reg[i], W(col0 * row, 1024));
-    //     reg[i+ept/2] = cmul(reg[i+ept/2], W(col1 * row, 1024));
-    // }
 
     thunderfft::unit::fft_kernel_r16_b64<true>((float*) (reg));
-
-    // __syncthreads();
-
-    // if(blockIdx.x==0 && threadIdx.x < 4) {
-    //     for(int i=0; i<32; i++) {
-    //         printf("%d %d %f %f\n", threadIdx.x, i, reg[i].x, reg[i].y);
-    //     }
-    // }
-    // __syncthreads();
-    // if(threadIdx.x==0 && threadIdx.y==0 && blockIdx.x==0) {
-    //     // for(int i=0; i<1024; i++) {
-    //     //     int idx = i+i/16;
-    //     //     printf("%f %f\n", smem[idx].x, smem[idx].y);
-    //     // }
-    //     printf("---------------\n");
-    // }
-    // __syncthreads();
-
-    return;
 }
 
 template<>
@@ -80,8 +44,52 @@ ThunderFFT_kernel_reg<float, 1024, 1, false>(vec2_t<float>* __restrict__ reg, ve
 
 template<>
 __device__ __forceinline__ void
-ThunderFFT_kernel_reg<half, 1024, 1, true>(vec2_t<half>* __restrict__ reg, vec2_t<half>* W, void *workspace) {
-    
+ThunderFFT_kernel_reg<half, 1024, 1, true>(vec2_t<half>* __restrict__ reg, vec2_t<half>* W_reg, void *workspace) {
+    int laneid = threadIdx.x;
+    int block_id = blockIdx.x;
+
+    int ept = 32; // N * batch / threads_per_warp
+
+
+
+    vec2_t<half>* smem = (vec2_t<half>*)workspace;
+
+    thunderfft::unit_fp16::fft_kernel_r64_b16<true>(reg, W_reg);
+
+    using L_in = layout_t<64, 16, 1, 64, 16, 1, false>;
+    ThunderFFT_reg2smem_N64<half, L_in>(smem, reg);
+
+    __syncthreads();
+
+    for(int i=0; i<ept/2; i++) {
+        int row = i%4 * 4 + (laneid%4);
+        int rev_row = reverse_bit_groups<2,4>(row);
+
+        int col0 = laneid/4 + (i/4) * 16;
+        int col1 = col0 + 8;
+
+        int index0 = row * 64 + col0; index0 += index0/L_in::pad_period * L_in::pad;
+        int index1 = row * 64 + col1; index1 += index1/L_in::pad_period * L_in::pad;
+
+        reg[i] = smem[index0];
+        reg[i+ept/2] = smem[index1];
+        
+        reg[i] = cmul(reg[i], W(col0 * rev_row, 1024));
+        reg[i+ept/2] = cmul(reg[i+ept/2], W(col1 * rev_row, 1024));
+    }
+
+
+
+    thunderfft::unit_fp16::fft_kernel_r16_b64<true>(reg, W_reg);
+
+    // __syncthreads();
+    // if(threadIdx.x<8 && threadIdx.y==0 && blockIdx.x==0) {
+    //     for(int i=0; i<ept; i++) {
+    //         printf("%d reg[%d]: %f %f\n", threadIdx.x, i, __half2float(reg[i].x), __half2float(reg[i].y));
+    //     }
+    //     printf("---------------\n");
+    // }
+    // __syncthreads();
 }
 
 template<>
@@ -168,6 +176,7 @@ ThunderFFT_reg2smem_N1024(vec2_t<T>* __restrict__ smem,
     //     }
     //     printf("---------------\n");
     // }
-    __syncthreads();
+
+    // __syncthreads();
 }
 }

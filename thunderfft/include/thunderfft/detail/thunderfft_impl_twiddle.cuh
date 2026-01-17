@@ -14,7 +14,7 @@ namespace thunderfft {
 // Compile-time constants
 // ============================================================
 constexpr int WARP_SIZE      = 32;
-constexpr int UNIT_ENTRIES   = 28;
+constexpr int UNIT_ENTRIES   = 36;
 constexpr int UNIT_W_SIZE    = UNIT_ENTRIES * WARP_SIZE * 2;
 
 // ============================================================
@@ -146,6 +146,67 @@ void build_unit_twiddle_host(std::vector<PairT>& W) {
                         i0 = f(i0);
                         i1 = f(i1);
                     }
+
+                    i0 ^= i_perm;  i1 ^= i_perm;
+                    j0 ^= j_perm;  j1 ^= j_perm;
+
+                    i0 = (i0 % 4) * 2 + i0 / 4;
+                    i1 = (i1 % 4) * 2 + i1 / 4;
+                    j0 = (j0 % 4) * 2 + j0 / 4;
+                    j1 = (j1 % 4) * 2 + j1 / 4;
+
+                    const int index1 =
+                        (j0 / 2) * (k + stride * (i0 / 2)) +
+                        stride * (i0 & 1) - stride * (j0 & 1);
+                    const int index2 =
+                        (j1 / 2) * (k + stride * (i1 / 2)) +
+                        stride * (i1 & 1) - stride * (j1 & 1);
+
+                    float c1 = std::cos(2.0f * M_PI * index1 / float(4 * stride));
+                    float c2 = std::cos(2.0f * M_PI * index2 / float(4 * stride));
+
+                    if (!forward) {
+                        if ((i0 + j0) & 1) c1 = -c1;
+                        if ((i1 + j1) & 1) c2 = -c2;
+                    }
+
+                    const int idx =
+                        ((dir * UNIT_ENTRIES + entry) * 32 + lane);
+
+                    W[idx] = make_pair<PairT>(c1, c2);
+                }
+            }
+
+            ++entry;
+        }
+    }
+
+    for (int stage = 1; stage < 2; ++stage) {
+        const int stride = 1 << (stage << 1);
+
+        for (int _j = 0; _j < n / radix; ++_j) {
+            if (_j % (1 << (2 - stage)) != 0) continue;
+
+            int j = (_j % 4) * 4 + _j / 4;
+
+            const int j_perm =
+                (stride >= radix)
+                  ? ((j / (stride / radix)) / 2 * 2) % radix
+                  : 0;
+            const int i_perm = 0;//((j / stride) / 2 * 2) % radix;
+            const int k      = j % stride;
+
+            for (int lane = 0; lane < 32; ++lane) {
+                for (int dir = 0; dir < 2; ++dir) {
+                    const bool forward = (dir == 0);
+
+                    int i0 = lane / 4;
+                    int i1 = lane / 4;
+                    int j0 = (lane % 4) * 2;
+                    int j1 = (lane % 4) * 2 + 1;
+
+                    i0 = f(i0);
+                    i1 = f(i1);
 
                     i0 ^= i_perm;  i1 ^= i_perm;
                     j0 ^= j_perm;  j1 ^= j_perm;

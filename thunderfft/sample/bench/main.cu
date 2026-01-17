@@ -26,10 +26,10 @@ template <long long N> int test() {
 
     baseline_fft(h_input, h_output, N, batch);
     
-    thunderfft::ThunderFFTInitialize<float>(N);
-    thunderfft::thunderfft_benchmark_reg<float, N>(h_input, h_output, batch);
-    thunderfft::thunderfft_benchmark_smem<float, N>(h_input, h_output, batch);
-    thunderfft::ThunderFFTFinalize<float>();
+    // thunderfft::ThunderFFTInitialize<float>(N);
+    // thunderfft::thunderfft_benchmark_reg<float, N>(h_input, h_output, batch);
+    // thunderfft::thunderfft_benchmark_smem<float, N>(h_input, h_output, batch);
+    // thunderfft::ThunderFFTFinalize<float>();
 
     thunderfft::ThunderFFTInitialize<half>(N);
     thunderfft::thunderfft_benchmark_reg<half, N>(h_input_half, h_output, batch);

@@ -80,9 +80,12 @@ float check_max_abs_err(const float2 *ref, const T *test, int N) {
         float abs_err = sqrtf(dx * dx + dy * dy);
         if (abs_err > max_abs_err)
             max_abs_err = abs_err;
+        if (i < 1024 && abs_err >1.0) {
+            printf("mismatch at %d: ref=(%f,%f), test=(%f,%f), abs_err=%f\n",
+                   i, ref[i].x, ref[i].y, tf.x, tf.y, abs_err);
+        }
     }
 
-    // 요구사항: "maximum absolute error만 출력"
     return max_abs_err;
 }
 

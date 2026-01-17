@@ -24,10 +24,20 @@ __global__ void ThunderFFT_benchmark_reg(
     using L_out = layout_t<N, BPB, 1, N, 16, 1, false>;
 
     
-    vec2_t<T> W[28];
+    vec2_t<T> W[36];
     if constexpr (std::is_same_v<T, half>) {
-        unit_fp16::make_reg_b_precompute<forward>(W);
+        unit_fp16::make_reg_b_precompute<N, forward>(W);
+
+        // if(threadIdx.x==0 && threadIdx.y==0 && blockIdx.x==0) {
+        //     printf("%d-point FFT Twiddle Factors:\n", N);
+        //     for(int i=0; i<36; i++) {
+        //         printf("%f %f\n", __half2float(W[i].x), __half2float(W[i].y));
+        //     }
+        //     printf("---------------\n");
+        // }   
     }
+
+
 
     ThunderFFT_gmem2smem<T, L_in>(s_in, d_input);
     __syncthreads();
@@ -35,6 +45,7 @@ __global__ void ThunderFFT_benchmark_reg(
     ThunderFFT_smem2reg<T, L_in>(reg, s_in);
     __syncthreads();
 
+    #pragma unroll 1
     for(int i=0; i<inside_repeats; i++) {
         ThunderFFT_kernel_reg<T, N, BPB, forward>(reg, (vec2_t<T>*)W, s_in);
     }
@@ -46,15 +57,6 @@ __global__ void ThunderFFT_benchmark_reg(
 
     ThunderFFT_smem2gmem<T, L_out>(d_output, s_in);
     __syncthreads();
-
-    // if(threadIdx.x==0 && threadIdx.y==0 && blockIdx.x==0) {
-    //     for(int j=0; j<16; j++) {
-    //         for(int i=0; i<64; i++) printf("(%f,%f) ", d_output[j*64+i].x, d_output[j*64+i].y);
-    //         printf("\n");
-    //     }
-        
-    // }
-
 }
 
 template <typename T, unsigned int N>
@@ -116,19 +118,26 @@ __global__ void ThunderFFT_benchmark_smem(
     vec2_t<T> reg[ept];
 
 
-    vec2_t<T> W[28];
+    vec2_t<T> W[36];
     if constexpr (std::is_same_v<T, half>) {
-        unit_fp16::make_reg_b_precompute<forward>(W);
+        unit_fp16::make_reg_b_precompute<N, forward>(W);
     }
 
     // Define layout type
     // N, BPB, ElemStride, BatchStride, PadPeriod, Pad, Reversed
+    
+    //N==64
+    // using L_in = layout_t<N, BPB, 1, N, 64, 4, true>;
+    // using L_out = layout_t<N, BPB, 1, N, 16, 1, false>;
+
+    //N==1024
     using L_in = layout_t<N, BPB, 1, N, 64, 4, true>;
-    using L_out = layout_t<N, BPB, 1, N, 16, 1, false>;
+    using L_out = layout_t<N, BPB, 1, N, 64, 1, false>;
 
     ThunderFFT_gmem2smem<T, L_in>(s_in, d_input);
     __syncthreads();
 
+    #pragma unroll 1
     for(int i=0; i<inside_repeats; i++) {
     ThunderFFT_smem2reg<T, L_in>(reg, s_in);
     __syncthreads();
