@@ -18,9 +18,6 @@ target_link_libraries(benchmark PRIVATE
   CUDA::cufft
 )
 
-set_target_properties(benchmark PROPERTIES
-  CUDA_SEPARABLE_COMPILATION ON
-)
 
 # 공통 최적화 옵션
 target_compile_options(benchmark PRIVATE

@@ -43,7 +43,7 @@ void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch) {
 
     auto kernel = [&](unsigned int inside_repeats) {
         cufftExecC2C(plan, (cufftComplex *)d_input, (cufftComplex *)d_output,
-                     CUFFT_INVERSE);
+                     CUFFT_FORWARD);
         // assert("4096 half is not supported" && false);
     };
 

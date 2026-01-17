@@ -38,7 +38,7 @@ __global__ void ThunderFFT_global_kernel(const vec2_t<T>* __restrict__ d_input,
     ThunderFFT_smem2reg<T, L_in>(reg, s_in);
     __syncthreads();
 
-    ThunderFFT_kernel_reg<T, N, BPB, forward>(reg);
+    ThunderFFT_kernel_reg<T, N, BPB, forward>(reg, nullptr, nullptr);
     __syncthreads();
 
     ThunderFFT_reg2smem<T, L_out>(s_in, reg);

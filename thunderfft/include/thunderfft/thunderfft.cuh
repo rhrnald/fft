@@ -85,7 +85,7 @@ static T* preprocess_W(int N);
 // Loads one logical FFT fragment from global memory into per-thread registers.
 // - reg  : destination register buffer
 // - gmem : source global memory buffer (read-only)
-template <typename T>
+template <typename T, int N, int batch>
 __device__ __forceinline__ void
 ThunderFFT_gmem2reg(vec2_t<T>* __restrict__ reg,
                     const vec2_t<T>* __restrict__ gmem);
@@ -97,7 +97,7 @@ ThunderFFT_gmem2reg(vec2_t<T>* __restrict__ reg,
 // Stores one logical FFT fragment from per-thread registers to global memory.
 // - gmem : destination global memory buffer
 // - reg  : source register buffer (read-only)
-template <typename T>
+template <typename T, int N, int batch>
 __device__ __forceinline__ void
 ThunderFFT_reg2gmem(vec2_t<T>* __restrict__ gmem,
                     const vec2_t<T>* __restrict__ reg);
@@ -222,7 +222,7 @@ ThunderFFT_kernel_smem_pad(vec2_t<T>* __restrict__ s_input,
 // - N, batch: runtime parameters used for dispatch/loops as needed
 template <typename T, int N, int batch, bool forward>
 __device__ __forceinline__ void
-ThunderFFT_kernel_reg(vec2_t<T>* __restrict__ reg);
+ThunderFFT_kernel_reg(vec2_t<T>* __restrict__ reg, vec2_t<T>* __restrict__ W, void *workspace);
 
 }  // namespace thunderfft
 

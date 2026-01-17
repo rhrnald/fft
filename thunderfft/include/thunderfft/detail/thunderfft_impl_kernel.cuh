@@ -1,6 +1,8 @@
 #include "kernel/global_kernel.cuh"
 
 namespace thunderfft {
+
+    
 template <typename T, int N, bool forward>
 inline void ThunderFFT_global(vec2_t<T>* d_input,
                             vec2_t<T>* d_output,
@@ -11,9 +13,9 @@ inline void ThunderFFT_global(vec2_t<T>* d_input,
   constexpr int BPB   = batch_per_block<N>;
   constexpr int WPB   = warp_per_block<N>;
 
-    const dim3 grid ( batch  / BPB );
-    const dim3 block( threads_per_warp, WPB );
-    const size_t shmem_bytes = 2 * ( sizeof(T) * 2 ) * (N+pad_h(N)) * BPB;
+    constexpr dim3 grid ( batch  / BPB );
+    constexpr dim3 block( threads_per_warp, WPB );
+    constexpr size_t shmem_bytes = ( sizeof(T) * 2 ) * (N+pad_h(N)) * BPB;
 
     CHECK_CUDA(cudaFuncSetAttribute(
         detail::ThunderFFT_global_kernel<T, N, forward>,
@@ -32,3 +34,6 @@ inline void ThunderFFT_global(vec2_t<T>* d_input,
 #include "kernel/unit_kernel_fp16.cuh"
 
 #include "kernel/shared_kernel_n64_b16.cuh"
+#include "kernel/shared_kernel_n256_b16.cuh"
+#include "kernel/shared_kernel_n1024_b1.cuh"
+#include "kernel/shared_kernel_n4096_b1.cuh"

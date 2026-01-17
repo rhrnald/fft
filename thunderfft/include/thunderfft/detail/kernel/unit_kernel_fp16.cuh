@@ -69,7 +69,7 @@ __device__ __forceinline__ void fill_reg_b(half2 b[], int stride_log2, int strid
 }
 
 template <bool forward>
-__device__ __forceinline__ void make_reg_b(unsigned int *W) {
+__device__ __forceinline__ void make_reg_b(vec2_t<half> *W) {
     constexpr int n = 64;
     constexpr int radix = 4;
     for (int i = 0; i < 3; ++i) {
@@ -92,6 +92,12 @@ __device__ __forceinline__ void make_reg_b(unsigned int *W) {
         }
 
     }
+}
+
+template <bool forward>
+__device__ __forceinline__ void make_reg_b_precompute(vec2_t<half> *W) {
+    auto twiddle = ThunderFFT_get_unit_twiddle_half2();
+    for(int i=0; i<28; i++) W[i] = twiddle[(threadIdx.x%32) + 32*i];
 }
 
 template <typename T>
@@ -121,7 +127,7 @@ static __device__ void mma_m16n8k8_fp16_fp16_rowcol(unsigned int d[2],
 }
 
 template <bool forward>
-__device__ void fft_kernel_r64_b16(vec2_t<half>* reg)
+__device__ void fft_kernel_r64_b16(vec2_t<half>* reg, vec2_t<half>* W)
 {
     // compile-time constants (function-local)
     constexpr int tc_m      = 16;
@@ -138,9 +144,7 @@ __device__ void fft_kernel_r64_b16(vec2_t<half>* reg)
 
     const int laneid = threadIdx.x % warp_size;
 
-    half2* W ;//= ThunderFFT_get_unit_twiddle_half2();
     W--;
-
     // #pragma unroll
     for (int i = 0; i < iter; ++i) {
         const int stride = 1 << (i << 1); // 4^i
@@ -179,7 +183,7 @@ __device__ void fft_kernel_r64_b16(vec2_t<half>* reg)
                 W++;
             }
 
-            auto reg_frag_b = W;
+            auto reg_frag_b = (unsigned int *)W;
 
             mma_m16n8k8_fp16_fp16_rowcol(
                 (unsigned int *)reg_frag_d, (unsigned int *)reg_frag_a,

@@ -2,6 +2,8 @@
 #include <type_traits>
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <stdexcept>
+
 
 #define PI 3.14159265358979323846
 

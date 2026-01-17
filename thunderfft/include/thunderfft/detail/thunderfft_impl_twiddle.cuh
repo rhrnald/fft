@@ -180,7 +180,6 @@ void build_unit_twiddle_host(std::vector<PairT>& W) {
             ++entry;
         }
     }
-
     assert(entry == UNIT_ENTRIES);
 }
 
@@ -208,19 +207,19 @@ inline void ThunderFFTInitialize(int N) {
       unit_inited_half = true;
     }
   } else {
-    static bool unit_inited_float = false;
-    if (!unit_inited_float) {
-      std::vector<float2> h_unit;
-      build_unit_twiddle_host(h_unit);
+    // static bool unit_inited_float = false;
+    // if (!unit_inited_float) {
+    //   std::vector<float2> h_unit;
+    //   build_unit_twiddle_host(h_unit);
 
-      tf_check_cuda(cudaMemcpyToSymbol(
-          detail::d_unit_twiddle_float2,
-          h_unit.data(),
-          sizeof(float2) * UNIT_W_SIZE),
-          "MemcpyToSymbol(d_unit_twiddle_float2)");
+    //   tf_check_cuda(cudaMemcpyToSymbol(
+    //       detail::d_unit_twiddle_float2,
+    //       h_unit.data(),
+    //       sizeof(float2) * UNIT_W_SIZE),
+    //       "MemcpyToSymbol(d_unit_twiddle_float2)");
 
-      unit_inited_float = true;
-    }
+    //   unit_inited_float = true;
+    // }
   }
 
   // ---------- N-dependent twiddle ----------

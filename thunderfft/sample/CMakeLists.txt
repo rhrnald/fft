@@ -10,4 +10,5 @@ if(NOT MATHDX_ROOT)
 endif()
 
 # add_subdirectory(conv2d)
-add_subdirectory(fft1d)
+# add_subdirectory(fft1d)
+add_subdirectory(bench)

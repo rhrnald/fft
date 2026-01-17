@@ -1,5 +1,5 @@
 #pragma once
-#include "thunderfft/detail/utils.h"
+#include "thunderfft/detail/util_cuda.h"
 #include "stat.h"
 #include <iostream>
 
@@ -41,6 +41,12 @@ float measure_execution_ms(Kernel &&kernel, const unsigned int warm_up_runs,
     return time / runs;
 }
 
+struct PerfStat {
+    double comp_ms;
+    double e2e_ms;
+    double comm_ms;
+};
+
 template <typename T>
 __host__ __device__ constexpr const char *bench_type_cstr() {
     if constexpr (std::is_same_v<T, half>)
@@ -51,6 +57,33 @@ __host__ __device__ constexpr const char *bench_type_cstr() {
         return "fp64";
     else
         return "unknown";
+}
+
+
+template <typename T>
+float check_max_abs_err(const float2 *ref, const T *test, int N) {
+    float max_abs_err = 0.0f;
+
+    for (int i = 0; i < N; ++i) {
+        float2 tf;
+        if constexpr (std::is_same_v<T, float2>) {
+            tf = test[i];
+        } else if constexpr (std::is_same_v<T, half2>) {
+            tf = make_float2(__half2float(test[i].x),
+                             __half2float(test[i].y));
+        } else {
+            static_assert(sizeof(T) == 0,
+                          "check_max_abs_err: unsupported type T");
+        }
+        float dx = ref[i].x - tf.x;
+        float dy = ref[i].y - tf.y;
+        float abs_err = sqrtf(dx * dx + dy * dy);
+        if (abs_err > max_abs_err)
+            max_abs_err = abs_err;
+    }
+
+    // 요구사항: "maximum absolute error만 출력"
+    return max_abs_err;
 }
 
 template <typename T, unsigned int N, typename Kernel>

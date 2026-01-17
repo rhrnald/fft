@@ -283,7 +283,7 @@ __device__ void fft_kernel_r64_b16_precompute(float* reg, float2* W)
 
 
 template <bool forward>
-__device__ void fft_kernel_r16_b16(float* reg, const float* w_4096)
+__device__ void fft_kernel_r16_b64(float* reg)
 {
     // compile-time constants (function-local)
     constexpr int tc_m      = 16;
@@ -301,6 +301,9 @@ __device__ void fft_kernel_r16_b16(float* reg, const float* w_4096)
 
     const int laneid = threadIdx.x % threads_per_warp;
 
+
+    // const float* W = thunderfft::ThunderFFT_get_twiddle<float>();
+
     #pragma unroll
     for (int i = 0; i < iter; ++i) {
         const int stride = 1 << (i << 1); // 4^i
@@ -309,6 +312,7 @@ __device__ void fft_kernel_r16_b16(float* reg, const float* w_4096)
         #pragma unroll
         for (int _j = 0; _j < n / radix; ++_j) {
             int j = (_j%4 ) * 4 + _j/4;
+            // int j = _j;
             float reg_frag_a[tc_m * tc_k / threads_per_warp];
             float reg_frag_d[tc_m * tc_n / threads_per_warp];
 
@@ -321,11 +325,11 @@ __device__ void fft_kernel_r16_b16(float* reg, const float* w_4096)
             const int j_perm = (stride >= radix)
                                  ? ((j / (stride / radix)) / 2 * 2) % radix
                                  : 0;
-            const int i_perm = ((j / stride) / 2 * 2) % radix;
+            const int i_perm = i==0? ((j / stride) / 2 * 2) % radix : 0;
             const int k      = j % stride;
 
             if( _j % ( 1<< (2-i)) == 0)
-                fill_reg_b<forward>(reg_frag_b, i * 2, stride, i_perm, j_perm, k, w_4096, i);
+                fill_reg_b<forward>(reg_frag_b, i * 2, stride, i_perm, j_perm, k, i*2);
 
             mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b, reg_frag_zero);
 
@@ -350,6 +354,72 @@ __device__ void fft_kernel_r16_b16(float* reg, const float* w_4096)
         }
     }
 }
+// {
+//     // compile-time constants (function-local)
+//     constexpr int tc_m      = 16;
+//     constexpr int tc_n      = 8;
+//     constexpr int tc_k      = 8;
+//     constexpr int radix     = tc_k / 2;    // 4
+//     constexpr int iter      = 2;
+//     constexpr int n         = 64;          // 4^3
+//     constexpr int ept       = (n * tc_m) / threads_per_warp; // element-per-thread (if needed)
+
+//     float reg_frag_zero[tc_m * tc_n / threads_per_warp];
+//     #pragma unroll
+//     for (int i = 0; i < tc_m * tc_n / threads_per_warp; ++i)
+//         reg_frag_zero[i] = 0.0f;
+
+//     const int laneid = threadIdx.x % threads_per_warp;
+
+//     #pragma unroll
+//     for (int i = 0; i < iter; ++i) {
+//         const int stride = 1 << (i << 1); // 4^i
+
+//         float reg_frag_b[tc_k * tc_n / threads_per_warp];
+//         #pragma unroll
+//         for (int _j = 0; _j < n / radix; ++_j) {
+//             int j = (_j%4 ) * 4 + _j/4;
+//             float reg_frag_a[tc_m * tc_k / threads_per_warp];
+//             float reg_frag_d[tc_m * tc_n / threads_per_warp];
+
+//             reg_frag_a[0] = reg[j * 2];
+//             reg_frag_a[1] = reg[j * 2 + 2 * n / radix];
+//             reg_frag_a[2] = reg[j * 2 + 1];
+//             reg_frag_a[3] = reg[j * 2 + 1 + 2 * n / radix];
+
+//             // twiddle/permutation indices
+//             const int j_perm = (stride >= radix)
+//                                  ? ((j / (stride / radix)) / 2 * 2) % radix
+//                                  : 0;
+//             const int i_perm = ((j / stride) / 2 * 2) % radix;
+//             const int k      = j % stride;
+
+//             if( _j % ( 1<< (2-i)) == 0)
+//                 fill_reg_b<forward>(reg_frag_b, i * 2, stride, i_perm, j_perm, k, i*2);
+
+//             mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b, reg_frag_zero);
+
+//             reg[j * 2]                                     = reg_frag_d[0];
+//             reg[j * 2 + 1]                                 = reg_frag_d[1];
+//             reg[j * 2 + 2 * n / radix]                     = reg_frag_d[2];
+//             reg[j * 2 + 1 + 2 * n / radix]                 = reg_frag_d[3];
+//         }
+
+//         if (i < iter - 1) {
+//             // tc_k == 8 iterations
+//             for (int jk = 0; jk < tc_k; ++jk) {
+//                 const int j = (jk / stride) * (radix * stride); // 4*stride
+//                 const int k = jk % stride;
+//                 permute_radix4_tmp(
+//                     reg[2 * (k + j)],                  reg[2 * (k + j) + 1],
+//                     reg[2 * (k + j + stride)],         reg[2 * (k + j + stride) + 1],
+//                     reg[2 * (k + j + stride * 2)],     reg[2 * (k + j + stride * 2) + 1],
+//                     reg[2 * (k + j + stride * 3)],     reg[2 * (k + j + stride * 3) + 1],
+//                     laneid & 3);
+//             }
+//         }
+//     }
+// }
 
 __device__ __forceinline__
 void smem2reg(vec2_t<float>* reg,
