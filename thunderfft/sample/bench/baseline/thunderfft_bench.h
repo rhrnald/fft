@@ -74,7 +74,7 @@ void thunderfft_benchmark_reg(vec2_t<T>* h_input, float2* baseline,
     const dim3 grid ( batch  / BPB );
     const dim3 block( threads_per_warp, WPB );
 
-    const size_t shmem_bytes = 2 * sizeof(T2) * (N+pad_h(N)) * BPB;
+    const size_t shmem_bytes = sizeof(T2) * (N+pad_h(N)) * BPB;
     // const size_t shmem_bytes = 2 * sizeof(float2) * (N+pad_h(N)) * BPB;
 
     T* dW;

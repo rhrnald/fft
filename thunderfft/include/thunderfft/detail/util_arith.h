@@ -53,26 +53,13 @@ __device__ __forceinline__ half2 cmul(half2 a, float2 w) {
 }
 
 __device__ __forceinline__ half2 cmul(half2 a, half2 b) {
-    // a = (ax, ay)
-    // b = (bx, by)
+    // c = (0, 0)
+    // constexpr half2 zero = __half2{0.0f, 0.0f};
+    const half2 zero = __float2half2_rn(0.0f);
 
-    // swap(a) = (ay, ax)
-    half2 a_swapped = __halves2half2(__high2half(a), __low2half(a));
 
-    // Element-wise multiply
-    // p1 = (ax*bx, ay*by)
-    half2 p1 = __hmul2(a, b);
-
-    // p2 = (ay*bx, ax*by)
-    half2 p2 = __hmul2(a_swapped, b);
-
-    // real = ax*bx - ay*by  → (p1.x - p1.y)
-    half real = __hsub(__low2half(p1), __high2half(p1));
-
-    // imag = ay*bx + ax*by  → (p2.x + p2.y)
-    half imag = __hadd(__low2half(p2), __high2half(p2));
-
-    return __halves2half2(real, imag);
+    // Complex multiply: a * b
+    return __hcmadd(a, b, zero);
 }
 
 
