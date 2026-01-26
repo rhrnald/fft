@@ -1,18 +1,46 @@
 namespace thunderfft {
 template<>
 __device__ __forceinline__ void
-ThunderFFT_kernel_reg<float, 128, 8, true>(vec2_t<float>* __restrict__ reg, vec2_t<float>* W, void *workspace) {
+ThunderFFT_kernel_reg<float, 128, 8, true>(vec2_t<float>* __restrict__ reg, vec2_t<float>* _W, void *workspace) {
     // float2 W[28];
     // unit::make_reg_b<true>(W);
 
     // unit::fft_kernel_r64_b16_precompute<true>((float*)reg, W);
     unit::fft_kernel_r64_b16<true>((float*)reg);
+
+    int laneid = threadIdx.x % threads_per_warp;
+    int ept = 32;
+
+    for (int i = 0; i < ept / 2; i++) {
+        int idx = i + (laneid % 4) * 16;
+        rotate(reg[i + ept / 2], idx, 128);
+
+        auto t1 = reg[i] + reg[i + ept / 2];
+        auto t2 = reg[i] - reg[i + ept / 2];
+
+        reg[i] = t1;
+        reg[i + ept / 2] = t2;
+    }
 }
 
 template<>
 __device__ __forceinline__ void
-ThunderFFT_kernel_reg<float, 128, 8, false>(vec2_t<float>* __restrict__ reg, vec2_t<float>* W, void *workspace) {
+ThunderFFT_kernel_reg<float, 128, 8, false>(vec2_t<float>* __restrict__ reg, vec2_t<float>* _W, void *workspace) {
     unit::fft_kernel_r64_b16<false>((float*)reg);
+
+    int laneid = threadIdx.x % threads_per_warp;
+    int ept = 32;
+
+    for (int i = 0; i < ept / 2; i++) {
+        int idx = i + (laneid % 4) * 16;
+        rotate(reg[i + ept / 2], -idx, 128);
+
+        auto t1 = reg[i] + reg[i + ept / 2];
+        auto t2 = reg[i] - reg[i + ept / 2];
+
+        reg[i] = t1;
+        reg[i + ept / 2] = t2;
+    }
 }
 
 template<>

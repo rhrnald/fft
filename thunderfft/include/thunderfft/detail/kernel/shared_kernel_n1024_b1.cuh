@@ -49,8 +49,8 @@ ThunderFFT_kernel_reg<float, 1024, 1, true>(vec2_t<float>* __restrict__ reg, vec
         reg[i] = smem[index0];
         reg[i+ept/2] = smem[index1];
         
-        reg[i] = cmul(reg[i], W(col0 * rev_row, 1024));
-        reg[i+ept/2] = cmul(reg[i+ept/2], W(col1 * rev_row, 1024));
+        rotate(reg[i], col0 * rev_row, 1024);
+        rotate(reg[i+ept/2], col1 * rev_row, 1024);
     }
 
     thunderfft::unit::fft_kernel_r16_b64<true>((float*) (reg));
@@ -86,8 +86,8 @@ ThunderFFT_kernel_reg<float, 1024, 1, false>(vec2_t<float>* __restrict__ reg, ve
         reg[i] = smem[index0];
         reg[i+ept/2] = smem[index1];
         
-        reg[i] = cmul(reg[i], W(-col0 * rev_row, 1024));
-        reg[i+ept/2] = cmul(reg[i+ept/2], W(-col1 * rev_row, 1024));
+        rotate(reg[i], -col0 * rev_row, 1024);
+        rotate(reg[i+ept/2], -col1 * rev_row, 1024);
     }
 
     thunderfft::unit::fft_kernel_r16_b64<false>((float*) (reg));
@@ -134,8 +134,8 @@ ThunderFFT_kernel_reg<half, 1024, 1, true>(vec2_t<half>* __restrict__ reg, vec2_
         reg[i] = smem[index0];
         reg[i+ept/2] = smem[index1];
         
-        reg[i] = cmul(reg[i], W(col0 * rev_row, 1024));
-        reg[i+ept/2] = cmul(reg[i+ept/2], W(col1 * rev_row, 1024));
+        rotate(reg[i], col0 * rev_row, 1024);
+        rotate(reg[i+ept/2], col1 * rev_row, 1024);
         // rotate(reg[i], col0 * rev_row, 1024);
         // rotate(reg[i+ept/2], col1 * rev_row, 1024);
 
@@ -203,8 +203,8 @@ ThunderFFT_kernel_reg<half, 1024, 1, false>(vec2_t<half>* __restrict__ reg, vec2
         reg[i] = smem[index0];
         reg[i+ept/2] = smem[index1];
         
-        reg[i] = cmul(reg[i], W(-col0 * rev_row, 1024));
-        reg[i+ept/2] = cmul(reg[i+ept/2], W(-col1 * rev_row, 1024));
+        rotate(reg[i], -col0 * rev_row, 1024);
+        rotate(reg[i+ept/2], -col1 * rev_row, 1024);
     }
 
     thunderfft::unit_fp16::fft_kernel_r16_b64<false>(reg, W_reg);

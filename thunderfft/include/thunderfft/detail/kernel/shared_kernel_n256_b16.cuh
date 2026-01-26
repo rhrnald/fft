@@ -27,8 +27,8 @@ ThunderFFT_kernel_reg<float, 256, 16, true>(vec2_t<float>* __restrict__ reg, vec
             // reg[i*4+j] = s_out_0[0];
             // reg[i*4+j+16] = s_out_1[0];
             
-            reg[i*4+j] = cmul(reg[i*4+j], W(index * j, 256));
-            reg[i*4+j+16] = cmul(reg[i*4+j+16], W(index * j, 256)); 
+            rotate(reg[i*4+j], index * j, 256);
+            rotate(reg[i*4+j+16], index * j, 256); 
         }
     }
 
@@ -70,7 +70,52 @@ ThunderFFT_kernel_reg<float, 256, 16, true>(vec2_t<float>* __restrict__ reg, vec
 template<>
 __device__ __forceinline__ void
 ThunderFFT_kernel_reg<float, 256, 16, false>(vec2_t<float>* __restrict__ reg, vec2_t<float>* W, void *workspace) {
+    int laneid = threadIdx.x;
+    int warpid = threadIdx.y;
+
+    int ept = 32;
+
+    vec2_t<float> *smem = (vec2_t<float>*)workspace;
+    thunderfft::unit::fft_kernel_r64_b16<false>((float*)reg);
+
+    thunderfft::unit::reg2smem(reg, smem+((laneid/4) + warpid * 16)*(64+4), smem + ((laneid/4+8) + warpid*16)*(64+4), 1);
+
+    __syncthreads();
+
+    auto s_out_0 = smem + (laneid/4) * (256 + 16);
+    auto s_out_1 = smem + (laneid/4+8) * (256 + 16);
+
+    for(int i=0; i<4; i++) {
+        int index_pad = (laneid%4) + i*4 + warpid*17;
+        int index = (laneid%4) + i*4 + warpid*16;
+        for(int j=0; j<4; j++) {
+            reg[i*4+j] = s_out_0[index_pad + j*(64+4)];
+            reg[i*4+j+16] = s_out_1[index_pad + j*(64+4)];
+            
+            rotate(reg[i*4+j], -index * j, 256);
+            rotate(reg[i*4+j+16], -index * j, 256); 
+        }
+    }
+
+    for (int i = 0; i < 8; i++) {
+        auto a = reg[4 * i + 0];
+        auto b = reg[4 * i + 1];
+        auto c = reg[4 * i + 2];
+        auto d = reg[4 * i + 3];
+
+        // radix-4 butterfly
+        auto t0 = a + c;
+        auto t1 = a - c;
+        auto t2 = b + d;
+        auto t3 = b - d; t3 = {t3.y, -t3.x}; // multiply by -i
+
+        reg[4 * i + 0] = t0 + t2;
+        reg[4 * i + 1] = t1 + t3;
+        reg[4 * i + 2] = t0 - t2;
+        reg[4 * i + 3] = t1 - t3;
+    }
     
+    __syncthreads();
 }
 
 template<>
@@ -101,8 +146,8 @@ ThunderFFT_kernel_reg<half, 256, 16, true>(vec2_t<half>* __restrict__ reg, vec2_
             // reg[i*4+j] = s_out_0[0];
             // reg[i*4+j+16] = s_out_1[0];
             
-            reg[i*4+j] = cmul(reg[i*4+j], W(index * j, 256));
-            reg[i*4+j+16] = cmul(reg[i*4+j+16], W(index * j, 256)); 
+            rotate(reg[i*4+j], index * j, 256);
+            rotate(reg[i*4+j+16], index * j, 256); 
         }
     }
 
@@ -130,7 +175,52 @@ ThunderFFT_kernel_reg<half, 256, 16, true>(vec2_t<half>* __restrict__ reg, vec2_
 template<>
 __device__ __forceinline__ void
 ThunderFFT_kernel_reg<half, 256, 16, false>(vec2_t<half>* __restrict__ reg, vec2_t<half>* W, void *workspace) {
+    int laneid = threadIdx.x;
+    int warpid = threadIdx.y;
+
+    int ept = 32;
     
+    vec2_t<half> *smem = (vec2_t<half>*)workspace;
+    thunderfft::unit_fp16::fft_kernel_r64_b16<false>((vec2_t<half>*)reg, W);
+
+    thunderfft::unit_fp16::reg2smem(reg, smem+((laneid/4) + warpid * 16)*(64+4), smem + ((laneid/4+8) + warpid*16)*(64+4), 1);
+
+    __syncthreads();
+
+    auto s_out_0 = smem + (laneid/4) * (256 + 16);
+    auto s_out_1 = smem + (laneid/4+8) * (256 + 16);
+
+    for(int i=0; i<4; i++) {
+        int index_pad = (laneid%4) + i*4 + warpid*17;
+        int index = (laneid%4) + i*4 + warpid*16;
+        for(int j=0; j<4; j++) {
+            reg[i*4+j] = s_out_0[index_pad + j*(64+4)];
+            reg[i*4+j+16] = s_out_1[index_pad + j*(64+4)];
+            
+            rotate(reg[i*4+j], -index * j, 256);
+            rotate(reg[i*4+j+16], -index * j, 256); 
+        }
+    }
+
+    for (int i = 0; i < 8; i++) {
+        auto a = reg[4 * i + 0];
+        auto b = reg[4 * i + 1];
+        auto c = reg[4 * i + 2];
+        auto d = reg[4 * i + 3];
+
+        // radix-4 butterfly
+        auto t0 = a + c;
+        auto t1 = a - c;
+        auto t2 = b + d;
+        auto t3 = b - d; t3 = {t3.y, -t3.x}; // multiply by -i
+
+        reg[4 * i + 0] = t0 + t2;
+        reg[4 * i + 1] = t1 + t3;
+        reg[4 * i + 2] = t0 - t2;
+        reg[4 * i + 3] = t1 - t3;
+    }
+    
+    __syncthreads();
 }
 
 template <typename T, typename sL>

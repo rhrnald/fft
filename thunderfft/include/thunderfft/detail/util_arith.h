@@ -71,6 +71,14 @@ __device__ __forceinline__ void rotate(vec2_t<half>& val, int index, int N) {
     val = cmul(val, W);
 }
 
+__device__ __forceinline__ void rotate(vec2_t<float>& val, int index, int N) {
+    constexpr float pi = 3.14159265358979323846f;
+    const float angle_f = -2.0f * pi * float(index) / float(N);
+
+    float2 W = make_float2(__cosf(angle_f), __sinf(angle_f));
+    val = cmul(val, W);
+}
+
 template <typename T> inline float2 to_float2(const T &v);
 
 template <> inline float2 to_float2<float2>(const float2 &v) { return v; }

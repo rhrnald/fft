@@ -5,12 +5,26 @@
 namespace thunderfft {
 template <int N, int BPB>
 struct bench_layout {
-    using L_in = std::conditional_t<N == 1024,
-                                    layout_t<N, BPB, 1, N, 64, 4, true>,
-                                    layout_t<N, BPB, 1, N, 64, 4, false>>;
-    using L_out = std::conditional_t<N == 1024,
-                                     layout_t<N, BPB, 1, N, 64, 1, false>,
-                                     layout_t<N, BPB, 1, N, 16, 1, false>>;
+    using L_in = layout_t<N, BPB, 1, N, 64, 4, false>;
+    using L_out = layout_t<N, BPB, 1, N, 16, 1, false>;
+};
+
+template <int BPB>
+struct bench_layout<1024, BPB> {
+    using L_in = layout_t<1024, BPB, 1, 1024, 64, 4, true>;
+    using L_out = layout_t<1024, BPB, 1, 1024, 64, 1, false>;
+};
+
+template <int BPB>
+struct bench_layout<128, BPB> {
+    using L_in = layout_t<128, BPB, 1, 128, 64, 4, true>;
+    using L_out = layout_t<128, BPB, 1, 128, 16, 1, false>;
+};
+
+template <int BPB>
+struct bench_layout<4096, BPB> {
+    using L_in = layout_t<4096, BPB, 1, 4096, 16, 1, true>;
+    using L_out = layout_t<4096, BPB, 1, 4096, 16, 1, false>;
 };
 
 template <typename T, int N, bool forward>
@@ -28,8 +42,6 @@ __global__ void ThunderFFT_benchmark_reg(
 
     vec2_t<T> reg[ept];
 
-    // Define layout type
-    // N, BPB, ElemStride, BatchStride, PadPeriod, Pad, Reversed
     using L_in = typename bench_layout<N, BPB>::L_in;
     using L_out = typename bench_layout<N, BPB>::L_out;
 
@@ -37,17 +49,7 @@ __global__ void ThunderFFT_benchmark_reg(
     vec2_t<T> W[36];
     if constexpr (std::is_same_v<T, half>) {
         unit_fp16::make_reg_b_precompute<N, forward>(W);
-
-        // if(threadIdx.x==0 && threadIdx.y==0 && blockIdx.x==0) {
-        //     printf("%d-point FFT Twiddle Factors:\n", N);
-        //     for(int i=0; i<36; i++) {
-        //         printf("%f %f\n", __half2float(W[i].x), __half2float(W[i].y));
-        //     }
-        //     printf("---------------\n");
-        // }   
     }
-
-
 
     ThunderFFT_gmem2smem<T, L_in>(s_in, d_input);
     __syncthreads();
@@ -123,7 +125,6 @@ void thunderfft_benchmark_reg(vec2_t<T>* h_input, float2* baseline,
     const dim3 block( threads_per_warp, WPB );
 
     const size_t shmem_bytes = sizeof(T2) * (N+pad_h(N)) * BPB;
-    // const size_t shmem_bytes = 2 * sizeof(float2) * (N+pad_h(N)) * BPB;
 
     T* dW;
     CHECK_CUDA(cudaFuncSetAttribute(
@@ -145,13 +146,6 @@ void thunderfft_benchmark_reg(vec2_t<T>* h_input, float2* baseline,
         CHECK_CUDA(cudaGetLastError());
     };
 
-    // auto kernel_half = [grid, block, shmem_bytes, dW_half, stream]
-    //             (half2* d_data, unsigned int inside_repeats) {
-    //     ThunderFFT_kernel_ir<half, N, batch_per_block>
-    //         <<<grid, block, shmem_bytes, stream>>>(d_data, d_data, dW_half, inside_repeats);
-    //     CHECK_CUDA(cudaGetLastError());
-    // };
-
     benchmark_run<T, N, 4>(kernel, kernel_e2e, h_input, baseline, batch, "th_r");
     CHECK_CUDA(cudaStreamDestroy(stream));
 }
@@ -171,14 +165,11 @@ __global__ void ThunderFFT_benchmark_smem(
 
     vec2_t<T> reg[ept];
 
-
     vec2_t<T> W[36];
     if constexpr (std::is_same_v<T, half>) {
         unit_fp16::make_reg_b_precompute<N, forward>(W);
     }
 
-    // Define layout type
-    // N, BPB, ElemStride, BatchStride, PadPeriod, Pad, Reversed
     using L_in = typename bench_layout<N, BPB>::L_in;
     using L_out = typename bench_layout<N, BPB>::L_out;
 
@@ -256,7 +247,6 @@ void thunderfft_benchmark_smem(vec2_t<T>* h_input, float2* baseline,
     const dim3 block( threads_per_warp, WPB );
 
     const size_t shmem_bytes = sizeof(T2) * (N+pad_h(N)) * BPB;
-    // const size_t shmem_bytes = 2 * sizeof(float2) * (N+pad_h(N)) * BPB;
 
     T* dW;
     CHECK_CUDA(cudaFuncSetAttribute(
@@ -277,13 +267,6 @@ void thunderfft_benchmark_smem(vec2_t<T>* h_input, float2* baseline,
             <<<grid, block, shmem_bytes, 0>>>(d_data, d_data, nullptr);
         CHECK_CUDA(cudaGetLastError());
     };
-
-    // auto kernel_half = [grid, block, shmem_bytes, dW_half, stream]
-    //             (half2* d_data, unsigned int inside_repeats) {
-    //     ThunderFFT_kernel_ir<half, N, batch_per_block>
-    //         <<<grid, block, shmem_bytes, stream>>>(d_data, d_data, dW_half, inside_repeats);
-    //     CHECK_CUDA(cudaGetLastError());
-    // };
 
     benchmark_run<T, N, 4>(kernel, kernel_e2e, h_input, baseline, batch, "th_s");
     CHECK_CUDA(cudaStreamDestroy(stream));
