@@ -14,7 +14,7 @@ void cufftdx_convolution(const float2* h_input, const float2* h_filter,
 
 template <int f>
 void my_convolution(const float2* h_input, const float2* h_filter,
-                    float2* h_output, int N);
+                    float2* h_output, int N, int warp_count);
 
 // Kernel for element-wise complex multiplication (used by cuFFT reference)
 __global__ void complex_multiply_kernel(cufftComplex* a, const cufftComplex* b, int n) {
@@ -133,6 +133,8 @@ static void make_test_input_random(float2* h_input, int N) {
         for (int j = 0; j < N; ++j) {
             h_input[i * N + j].x = rand() / (float)RAND_MAX;
             h_input[i * N + j].y = rand() / (float)RAND_MAX;
+            // h_input[i * N + j].x = i+j;
+            // h_input[i * N + j].y = 0;
         }
     }
 }
@@ -143,6 +145,8 @@ static void make_test_filter_random(float2* h_filter, int f) {
         for (int j = 0; j < f; ++j) {
             h_filter[i * f + j].x = rand() / (float)RAND_MAX;
             h_filter[i * f + j].y = rand() / (float)RAND_MAX;
+            // h_filter[i * f + j].x = i*3+j;
+            // h_filter[i * f + j].y = 0;
         }
     }
 }
@@ -180,9 +184,10 @@ static double linf_rel(const float2* a, const float2* b, size_t n) {
 }
 
 int main(int argc, char** argv) {
-    int N = 16384;
+    int N = 1024;
     int device = 0;
-    constexpr int F = 33;
+    int warp_count = 8;
+    constexpr int F = 3;
 
     if (argc >= 2) {
         N = std::atoi(argv[1]);
@@ -198,10 +203,18 @@ int main(int argc, char** argv) {
     if (argc >= 4) {
         device = std::atoi(argv[3]);
     }
+    if (argc >= 5) {
+        warp_count = std::atoi(argv[4]);
+    }
 
     if (N < F) {
         std::cerr << "Input size N must be >= " << F << "\n";
         return EXIT_FAILURE;
+    }
+
+    if (N != 1024) {
+        std::cout << "[ThunderFFT] Forcing N=1024 for this path.\n";
+        N = 1024;
     }
 
     const int out_size = N - F + 1;
@@ -210,7 +223,8 @@ int main(int argc, char** argv) {
               << "  Input size : " << N << " x " << N << "\n"
               << "  Filter size: " << F << " x " << F << "\n"
               << "  Output size: " << out_size << " x " << out_size << "\n"
-              << "  Device     : " << device << "\n";
+              << "  Device     : " << device << "\n"
+              << "  Warp count : " << warp_count << "\n";
 
     CHECK_CUDA(cudaSetDevice(device));
 
@@ -238,10 +252,10 @@ int main(int argc, char** argv) {
     make_test_filter_random(h_filter, F);
 
     std::cout << "\n--- Running ThunderFFT convolution ---\n";
-    my_convolution<F>(h_input, h_filter, h_output_thunder, N);
+    my_convolution<F>(h_input, h_filter, h_output_thunder, N, warp_count);
 
     std::cout << "\n--- Running cuFFTDx convolution ---\n";
-    cufftdx_convolution<F>(h_input, h_filter, h_output_cufftdx, N);
+    // cufftdx_convolution<F>(h_input, h_filter, h_output_cufftdx, N);
 
     std::cout << "\n--- Running cuFFT reference convolution (validation) ---\n";
     reference_convolution_cufft(h_input, h_filter, h_output_ref, N, F);
@@ -253,13 +267,13 @@ int main(int argc, char** argv) {
     std::cout << "\n--- Validation vs cuFFT reference ---\n";
     const double thunder_l2 = l2_rel(h_output_thunder, h_output_ref, output_count);
     const double thunder_linf = linf_rel(h_output_thunder, h_output_ref, output_count);
-    const double cufftdx_l2 = l2_rel(h_output_cufftdx, h_output_ref, output_count);
-    const double cufftdx_linf = linf_rel(h_output_cufftdx, h_output_ref, output_count);
+    // const double cufftdx_l2 = l2_rel(h_output_cufftdx, h_output_ref, output_count);
+    // const double cufftdx_linf = linf_rel(h_output_cufftdx, h_output_ref, output_count);
 
     std::cout << "L2 rel. error  (ThunderFFT vs cuFFT): " << thunder_l2 << "\n";
     std::cout << "Linf rel. error (ThunderFFT vs cuFFT): " << thunder_linf << "\n";
-    std::cout << "L2 rel. error  (cuFFTDx vs cuFFT)  : " << cufftdx_l2 << "\n";
-    std::cout << "Linf rel. error (cuFFTDx vs cuFFT) : " << cufftdx_linf << "\n";
+    // std::cout << "L2 rel. error  (cuFFTDx vs cuFFT)  : " << cufftdx_l2 << "\n";
+    // std::cout << "Linf rel. error (cuFFTDx vs cuFFT) : " << cufftdx_linf << "\n";
 
     const int to_print = std::min(8, out_size);  // limit for readability
     std::cout << "\nFirst " << to_print << " x " << to_print << " samples:\n";

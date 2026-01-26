@@ -15,17 +15,16 @@ void print_header() {
     if (g_title && *g_title) {
         std::printf("%s\n", g_title);
     }
-    std::printf("%-10s %5s %5s %9s | %13s | %13s | %13s | %13s\n", "type", "N",
-                "radix", "B", "max_err", "comp_ms", "comm_ms", "e2e_ms");
-    std::printf("---------- ----- ----- --------- | ------------- | "
-                "------------- | ------------- | -------------\n");
+    std::printf("%-10s %5s %9s | %13s | %13s | %13s\n", "type", "N",
+                "B", "max_err", "compute", "e2e");
+    std::printf("---------- ----- --------- | ------------- | "
+                "------------- | -------------\n");
 }
 
 void print_row(const stat::RunStat &s) {
     std::printf(
-        "%-10s %5u %5u %9u | %13.6g | %10.5f ms | %10.5f ms | %10.5f ms\n",
-        s.type.c_str(), s.N, s.radix, s.B, s.max_abs_err, s.comp_ms, s.comm_ms,
-        s.e2e_ms);
+        "%-10s %5u %9u | %13.6g | %10.5f ms | %10.5f ms\n",
+        s.type.c_str(), s.N, s.B, s.max_abs_err, s.compute_ms, s.e2e_ms);
 }
 } // unnamed namespace
 
@@ -55,11 +54,10 @@ void print_csv(const char *path) {
     std::ofstream ofs(path, std::ios::out);
     if (!ofs)
         return;
-    ofs << "type,N,radix,B,max_err,comp_ms,e2e_ms\n";
+    ofs << "type,N,B,max_err,compute_ms,e2e_ms\n";
     for (const auto &s : g_stats) {
-        ofs << s.type << ',' << s.N << ',' << s.radix << ',' << s.B << ','
-            << s.max_abs_err << ',' << s.comp_ms << ',' << s.e2e_ms << ','
-            << s.comm_ms << '\n';
+        ofs << s.type << ',' << s.N << ',' << s.B << ','
+            << s.max_abs_err << ',' << s.compute_ms << ',' << s.e2e_ms << '\n';
     }
 }
 
@@ -71,11 +69,9 @@ void print_ndjson(const char *path) {
         ofs << "{"
             << "\"type\":\"" << s.type << "\","
             << "\"N\":" << s.N << ","
-            << "\"radix\":" << s.radix << ","
             << "\"B\":" << s.B << ","
             << "\"max_err\":" << s.max_abs_err << ","
-            << "\"comp_ms\":" << s.comp_ms << ","
-            << "\"comm_ms\":" << s.comm_ms << ","
+            << "\"compute_ms\":" << s.compute_ms << ","
             << "\"e2e_ms\":" << s.e2e_ms << "}\n";
     }
 }

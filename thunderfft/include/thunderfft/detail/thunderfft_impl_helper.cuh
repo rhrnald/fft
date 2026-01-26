@@ -67,6 +67,17 @@ __device__ __forceinline__ void
 ThunderFFT_reg2smem_N64(vec2_t<T>* __restrict__ smem,
                     const vec2_t<T>* __restrict__ reg);
 
+                    
+template <typename T, typename sL>
+__device__ __forceinline__ void
+ThunderFFT_smem2reg_N128(vec2_t<T>* __restrict__ reg,
+                    const vec2_t<T>* __restrict__ smem);
+
+template <typename T, typename sL>
+__device__ __forceinline__ void
+ThunderFFT_reg2smem_N128(vec2_t<T>* __restrict__ smem,
+                    const vec2_t<T>* __restrict__ reg);
+
 template <typename T, typename sL>
 __device__ __forceinline__ void
 ThunderFFT_smem2reg_N256(vec2_t<T>* __restrict__ reg,
@@ -102,10 +113,11 @@ ThunderFFT_smem2reg(vec2_t<T>* __restrict__ reg,
                     const vec2_t<T>* __restrict__ smem) {
     constexpr int N = sL::N;
     if constexpr(N == 64) ThunderFFT_smem2reg_N64<T, sL>(reg, smem);
+    else if constexpr(N == 128) ThunderFFT_smem2reg_N128<T, sL>(reg, smem);
     else if constexpr(N == 256) ThunderFFT_smem2reg_N256<T, sL>(reg, smem);
     else if constexpr(N == 1024) ThunderFFT_smem2reg_N1024<T, sL>(reg, smem);
     else if constexpr(N == 4096) ThunderFFT_smem2reg_N4096<T, sL>(reg, smem);
-    // else static_assert(N == 64 || N == 256 || N == 1024 || N == 4096, "Unsupported N");
+    // else static_assert(N == 64 || N == 128 || N == 256 || N == 1024 || N == 4096, "Unsupported N");
 }
 
 template <typename T, typename sL>
@@ -114,6 +126,7 @@ ThunderFFT_reg2smem(vec2_t<T>* __restrict__ smem,
                     const vec2_t<T>* __restrict__ reg) {
     constexpr int N = sL::N;
     if constexpr(N == 64) ThunderFFT_reg2smem_N64<T, sL>(smem, reg);
+    else if constexpr(N == 128) ThunderFFT_reg2smem_N128<T, sL>(smem, reg);
     else if constexpr(N == 256) ThunderFFT_reg2smem_N256<T, sL>(smem, reg);
     else if constexpr(N == 1024) ThunderFFT_reg2smem_N1024<T, sL>(smem, reg);
     else if constexpr(N == 4096) ThunderFFT_reg2smem_N4096<T, sL>(smem, reg);

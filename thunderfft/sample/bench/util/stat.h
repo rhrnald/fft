@@ -10,9 +10,8 @@ struct RunStat {
     unsigned radix;   // radix
     unsigned B;       // batch size
     double max_abs_err;
-    double comp_ms; // kernel-only
-    double comm_ms; // communication (H2D+D2H 포함)
-    double e2e_ms;  // end-to-end (H2D+D2H 포함)
+    double compute_ms; // kernel-only (inside repeat)
+    double e2e_ms;     // end-to-end (no inside repeat)
 };
 
 // 결과 추가/관리

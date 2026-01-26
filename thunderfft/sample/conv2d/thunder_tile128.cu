@@ -59,152 +59,6 @@ __device__ static void print(half2* smem) {
     }
     __syncthreads();
 }
-
-// ---------------------------------------------------------------------------
-// 1024x1024 FFT-conv helpers (half2, 1-batch 1024-pt kernel)
-// ---------------------------------------------------------------------------
-static constexpr int kFFTSize1024 = 1024;
-static constexpr int kTileRows1024 = 32;
-static constexpr int kWorkspaceStride1024 = (64 + 64 / 32) * 16; // 1056
-
-__global__ void conv1024_x_forward(const half2* __restrict__ d_input,
-                                   half2* __restrict__ d_workspace,
-                                   int tile_idx) {
-    extern __shared__ unsigned char smem_raw[];
-    half2* smem_data = reinterpret_cast<half2*>(smem_raw);
-    half2* smem_ws = smem_data + kFFTSize1024 * kTileRows1024;
-
-    const int warp_id = threadIdx.x / 32;
-    const int lane = threadIdx.x & 31;
-    const int warp_count = blockDim.x / 32;
-    const int rows_per_warp = kTileRows1024 / warp_count;
-    const int row_base = tile_idx * kTileRows1024 + warp_id * rows_per_warp;
-
-    using L1024 = thunderfft::layout_t<kFFTSize1024, 1, 1, kFFTSize1024, 32, 0, false>;
-    half2 W_reg[36];
-    thunderfft::unit_fp16::make_reg_b_precompute<kFFTSize1024, true>(W_reg);
-    half2 reg[32];
-    half2* warp_ws = smem_ws + warp_id * kWorkspaceStride1024;
-
-    #pragma unroll
-    for (int r = 0; r < rows_per_warp; ++r) {
-        const int row = row_base + r;
-        half2* row_smem = smem_data + (warp_id * rows_per_warp + r) * kFFTSize1024;
-
-        for (int col = lane; col < kFFTSize1024; col += 32) {
-            row_smem[col] = d_input[row * kFFTSize1024 + col];
-        }
-        __syncwarp();
-
-        thunderfft::ThunderFFT_smem2reg<half, L1024>(reg, row_smem);
-        thunderfft::ThunderFFT_kernel_reg<half, kFFTSize1024, 1, true>(reg, W_reg, warp_ws);
-        thunderfft::ThunderFFT_reg2smem<half, L1024>(row_smem, reg);
-        __syncwarp();
-
-        for (int col = lane; col < kFFTSize1024; col += 32) {
-            d_workspace[row * kFFTSize1024 + col] = row_smem[col];
-        }
-        __syncwarp();
-    }
-}
-
-__global__ void conv1024_y_fwd_mul_inv(half2* __restrict__ d_workspace,
-                                      const half2* __restrict__ d_filter,
-                                      int tile_idx) {
-    extern __shared__ unsigned char smem_raw[];
-    half2* smem_data = reinterpret_cast<half2*>(smem_raw);
-    half2* smem_ws = smem_data + kFFTSize1024 * kTileRows1024;
-
-    const int warp_id = threadIdx.x / 32;
-    const int lane = threadIdx.x & 31;
-    const int warp_count = blockDim.x / 32;
-    const int cols_per_warp = kTileRows1024 / warp_count;
-    const int col_base = tile_idx * kTileRows1024 + warp_id * cols_per_warp;
-
-    using L1024 = thunderfft::layout_t<kFFTSize1024, 1, 1, kFFTSize1024, 32, 0, false>;
-    half2 W_fwd[36];
-    half2 W_inv[36];
-    thunderfft::unit_fp16::make_reg_b_precompute<kFFTSize1024, true>(W_fwd);
-    thunderfft::unit_fp16::make_reg_b_precompute<kFFTSize1024, false>(W_inv);
-    half2 reg[32];
-    half2* warp_ws = smem_ws + warp_id * kWorkspaceStride1024;
-
-    #pragma unroll
-    for (int c = 0; c < cols_per_warp; ++c) {
-        const int col = col_base + c;
-        half2* col_smem = smem_data + (warp_id * cols_per_warp + c) * kFFTSize1024;
-
-        for (int row = lane; row < kFFTSize1024; row += 32) {
-            col_smem[row] = d_workspace[row * kFFTSize1024 + col];
-        }
-        __syncwarp();
-
-        thunderfft::ThunderFFT_smem2reg<half, L1024>(reg, col_smem);
-        thunderfft::ThunderFFT_kernel_reg<half, kFFTSize1024, 1, true>(reg, W_fwd, warp_ws);
-        thunderfft::ThunderFFT_reg2smem<half, L1024>(col_smem, reg);
-        __syncwarp();
-
-        for (int row = lane; row < kFFTSize1024; row += 32) {
-            const int fidx = row * kFFTSize1024 + col;
-            col_smem[row] = cmul(col_smem[row], d_filter[fidx]);
-        }
-        __syncwarp();
-
-        thunderfft::ThunderFFT_smem2reg<half, L1024>(reg, col_smem);
-        thunderfft::ThunderFFT_kernel_reg<half, kFFTSize1024, 1, false>(reg, W_inv, warp_ws);
-        thunderfft::ThunderFFT_reg2smem<half, L1024>(col_smem, reg);
-        __syncwarp();
-
-        for (int row = lane; row < kFFTSize1024; row += 32) {
-            d_workspace[row * kFFTSize1024 + col] = col_smem[row];
-        }
-        __syncwarp();
-    }
-}
-
-__global__ void conv1024_x_inverse(const half2* __restrict__ d_workspace,
-                                   half2* __restrict__ d_output,
-                                   int out_size,
-                                   int tile_idx) {
-    extern __shared__ unsigned char smem_raw[];
-    half2* smem_data = reinterpret_cast<half2*>(smem_raw);
-    half2* smem_ws = smem_data + kFFTSize1024 * kTileRows1024;
-
-    const int warp_id = threadIdx.x / 32;
-    const int lane = threadIdx.x & 31;
-    const int warp_count = blockDim.x / 32;
-    const int rows_per_warp = kTileRows1024 / warp_count;
-    const int row_base = tile_idx * kTileRows1024 + warp_id * rows_per_warp;
-
-    using L1024 = thunderfft::layout_t<kFFTSize1024, 1, 1, kFFTSize1024, 32, 0, false>;
-    half2 W_inv[36];
-    thunderfft::unit_fp16::make_reg_b_precompute<kFFTSize1024, false>(W_inv);
-    half2 reg[32];
-    half2* warp_ws = smem_ws + warp_id * kWorkspaceStride1024;
-
-    #pragma unroll
-    for (int r = 0; r < rows_per_warp; ++r) {
-        const int row = row_base + r;
-        half2* row_smem = smem_data + (warp_id * rows_per_warp + r) * kFFTSize1024;
-
-        for (int col = lane; col < kFFTSize1024; col += 32) {
-            row_smem[col] = d_workspace[row * kFFTSize1024 + col];
-        }
-        __syncwarp();
-
-        thunderfft::ThunderFFT_smem2reg<half, L1024>(reg, row_smem);
-        thunderfft::ThunderFFT_kernel_reg<half, kFFTSize1024, 1, false>(reg, W_inv, warp_ws);
-        thunderfft::ThunderFFT_reg2smem<half, L1024>(row_smem, reg);
-        __syncwarp();
-
-        if (row < out_size) {
-            for (int col = lane; col < out_size; col += 32) {
-                d_output[row * out_size + col] = row_smem[col];
-            }
-        }
-        __syncwarp();
-    }
-}
 template <int f>
 __launch_bounds__(128)
 __global__ void convolution_kernel(
@@ -411,21 +265,12 @@ template <int f>
 void my_convolution(const float2* h_input,
                     const float2* h_filter,
                     float2* h_output,
-                    int N,
-                    int warp_count) {
+                    int N) {
     static constexpr int warmup_runs = 5;
     static constexpr int runs = 100;
 
-    if (N != kFFTSize1024) {
-        std::cerr << "[ThunderFFT] This path expects N=1024.\n";
-        return;
-    }
-    if (warp_count <= 0 || warp_count > kTileRows1024 || (kTileRows1024 % warp_count) != 0) {
-        std::cerr << "[ThunderFFT] warp_count must divide 32.\n";
-        return;
-    }
-
-    constexpr int tile_size = kFFTSize1024;
+    constexpr int tile_size = 128;
+    const int valid_tile_size = tile_size - f + 1;
     const int output_size = N - f + 1;
 
     // for(int i=0; i<128; i++) {
@@ -480,7 +325,6 @@ void my_convolution(const float2* h_input,
     // ----------------------------
     half2* d_input  = nullptr;
     half2* d_output = nullptr;
-    half2* d_workspace = nullptr;
     float2* d_filter_float = nullptr; // for cuFFT
     half2* d_filter_half = nullptr;   // final filter for kernel
 
@@ -488,13 +332,11 @@ void my_convolution(const float2* h_input,
     const size_t bytes_out = sizeof(half2) * (size_t)output_size * (size_t)output_size;
     const size_t bytes_f_f = sizeof(float2) * (size_t)tile_size * (size_t)tile_size;
     const size_t bytes_f_h = sizeof(half2)  * (size_t)tile_size * (size_t)tile_size;
-    const size_t bytes_ws  = sizeof(half2)  * (size_t)tile_size * (size_t)tile_size;
 
     CHECK_CUDA(cudaMalloc(&d_input, bytes_in));
     CHECK_CUDA(cudaMalloc(&d_output, bytes_out));
     CHECK_CUDA(cudaMalloc(&d_filter_float, bytes_f_f));
     CHECK_CUDA(cudaMalloc(&d_filter_half,  bytes_f_h));
-    CHECK_CUDA(cudaMalloc(&d_workspace,    bytes_ws));
 
     // H2D input (half2)
     CHECK_CUDA(cudaMemcpy(d_input, h_input_half.data(), bytes_in, cudaMemcpyHostToDevice));
@@ -528,49 +370,30 @@ void my_convolution(const float2* h_input,
         CHECK_CUDA(cudaGetLastError());
     }
 
-    // ThunderFFT init
-    thunderfft::ThunderFFTInitialize<half>(kFFTSize1024);
+    // ThunderFFT init (unchanged)
+    thunderfft::ThunderFFTInitialize<half>(64);
 
-    const size_t shared_memory_size =
-        sizeof(half2) * (kFFTSize1024 * kTileRows1024 + kWorkspaceStride1024 * warp_count);
+    // Shared memory: match your padding scheme.
+    // NOTE: your earlier smem_index used +1 per 32 elements, but this expression is "+ tile/16".
+    // Pick ONE consistently. Here I'll keep your existing host calc as-is; adjust if you switch pad period.
+    size_t shared_memory_size =
+        sizeof(half2) * (size_t)tile_size * ((size_t)tile_size + (size_t)tile_size / 16);
 
-    CHECK_CUDA(cudaFuncSetAttribute(conv1024_x_forward,
+    dim3 blockSize(128);
+    dim3 gridSize((output_size + valid_tile_size - 1) / valid_tile_size,
+                  (output_size + valid_tile_size - 1) / valid_tile_size);
+
+    CHECK_CUDA(cudaFuncSetAttribute(convolution_kernel<f>,
                                     cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                    static_cast<int>(shared_memory_size)));
-    CHECK_CUDA(cudaFuncSetAttribute(conv1024_y_fwd_mul_inv,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                    static_cast<int>(shared_memory_size)));
-    CHECK_CUDA(cudaFuncSetAttribute(conv1024_x_inverse,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                    static_cast<int>(shared_memory_size)));
+                                    (int)shared_memory_size));
 
-    const dim3 blockSize(warp_count * 32);
-    const int tiles = (kFFTSize1024 + kTileRows1024 - 1) / kTileRows1024;
+    auto kernel = [&]() {
+        convolution_kernel<f><<<gridSize, blockSize, shared_memory_size>>>(
+            d_input, d_filter_half, d_output, N);
+    };
 
-    cudaEvent_t start{};
-    cudaEvent_t stop{};
-    CHECK_CUDA(cudaEventCreate(&start));
-    CHECK_CUDA(cudaEventCreate(&stop));
-    CHECK_CUDA(cudaEventRecord(start));
-
-    for (int i = 0; i < tiles; ++i) {
-        for (int j = 0; j < tiles; ++j) {
-            conv1024_x_forward<<<1, blockSize, shared_memory_size>>>(d_input, d_workspace, i);
-            CHECK_CUDA(cudaGetLastError());
-            conv1024_y_fwd_mul_inv<<<1, blockSize, shared_memory_size>>>(d_workspace, d_filter_half, j);
-            CHECK_CUDA(cudaGetLastError());
-            conv1024_x_inverse<<<1, blockSize, shared_memory_size>>>(d_workspace, d_output, output_size, i);
-            CHECK_CUDA(cudaGetLastError());
-        }
-    }
-
-    CHECK_CUDA(cudaEventRecord(stop));
-    CHECK_CUDA(cudaEventSynchronize(stop));
-    float ms = 0.0f;
-    CHECK_CUDA(cudaEventElapsedTime(&ms, start, stop));
-    CHECK_CUDA(cudaEventDestroy(start));
-    CHECK_CUDA(cudaEventDestroy(stop));
-
+    // float ms = measure_execution_ms(kernel, warmup_runs, runs);
+    float ms = measure_execution_ms(kernel, 0, 1);
     std::cout << "[ThunderFFT] Complex 2D convolution (half2 I/O, filter half2): "
               << ms << " ms" << std::endl;
 
@@ -587,9 +410,8 @@ void my_convolution(const float2* h_input,
     CHECK_CUDA(cudaFree(d_output));
     CHECK_CUDA(cudaFree(d_filter_float));
     CHECK_CUDA(cudaFree(d_filter_half));
-    CHECK_CUDA(cudaFree(d_workspace));
     CHECK_CUFFT(cufftDestroy(plan_forward));
 }
 
-template void my_convolution<3>(const float2*, const float2*, float2*, int, int);
-template void my_convolution<33>(const float2*, const float2*, float2*, int, int);
+template void my_convolution<3>(const float2*, const float2*, float2*, int);
+template void my_convolution<33>(const float2*, const float2*, float2*, int);

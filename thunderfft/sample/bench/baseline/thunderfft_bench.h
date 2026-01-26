@@ -3,6 +3,16 @@
 #include "helper.h"
 
 namespace thunderfft {
+template <int N, int BPB>
+struct bench_layout {
+    using L_in = std::conditional_t<N == 1024,
+                                    layout_t<N, BPB, 1, N, 64, 4, true>,
+                                    layout_t<N, BPB, 1, N, 64, 4, false>>;
+    using L_out = std::conditional_t<N == 1024,
+                                     layout_t<N, BPB, 1, N, 64, 1, false>,
+                                     layout_t<N, BPB, 1, N, 16, 1, false>>;
+};
+
 template <typename T, int N, bool forward>
 __global__ void ThunderFFT_benchmark_reg(
     vec2_t<T>*       d_input,
@@ -20,8 +30,8 @@ __global__ void ThunderFFT_benchmark_reg(
 
     // Define layout type
     // N, BPB, ElemStride, BatchStride, PadPeriod, Pad, Reversed
-    using L_in = layout_t<N, BPB, 1, N, 64, 4, true>;
-    using L_out = layout_t<N, BPB, 1, N, 16, 1, false>;
+    using L_in = typename bench_layout<N, BPB>::L_in;
+    using L_out = typename bench_layout<N, BPB>::L_out;
 
     
     vec2_t<T> W[36];
@@ -50,6 +60,44 @@ __global__ void ThunderFFT_benchmark_reg(
         ThunderFFT_kernel_reg<T, N, BPB, forward>(reg, (vec2_t<T>*)W, s_in);
     }
 
+    __syncthreads();
+
+    ThunderFFT_reg2smem<T, L_out>(s_in, reg);
+    __syncthreads();
+
+    ThunderFFT_smem2gmem<T, L_out>(d_output, s_in);
+    __syncthreads();
+}
+
+template <typename T, int N, bool forward>
+__global__ void ThunderFFT_benchmark_reg_e2e(
+    vec2_t<T>*       d_input,
+    vec2_t<T>*       d_output,
+    const T*         __restrict__ dW)  {
+    constexpr int BPB = batch_per_block<N>;
+    constexpr int WPB = warp_per_block<N>;
+    constexpr int ept = N * BPB / (threads_per_warp * WPB);
+
+    extern __shared__ __align__(16) unsigned char _smem[];
+    vec2_t<T>* s_in = reinterpret_cast<vec2_t<T>*>(_smem);
+
+    vec2_t<T> reg[ept];
+
+    using L_in = typename bench_layout<N, BPB>::L_in;
+    using L_out = typename bench_layout<N, BPB>::L_out;
+
+    vec2_t<T> W[36];
+    if constexpr (std::is_same_v<T, half>) {
+        unit_fp16::make_reg_b_precompute<N, forward>(W);
+    }
+
+    ThunderFFT_gmem2smem<T, L_in>(s_in, d_input);
+    __syncthreads();
+
+    ThunderFFT_smem2reg<T, L_in>(reg, s_in);
+    __syncthreads();
+
+    ThunderFFT_kernel_reg<T, N, BPB, forward>(reg, (vec2_t<T>*)W, s_in);
     __syncthreads();
 
     ThunderFFT_reg2smem<T, L_out>(s_in, reg);
@@ -90,6 +138,12 @@ void thunderfft_benchmark_reg(vec2_t<T>* h_input, float2* baseline,
             <<<grid, block, shmem_bytes, 0>>>(d_data, d_data, nullptr, inside_repeats);
         CHECK_CUDA(cudaGetLastError());
     };
+    auto kernel_e2e = [grid, block, shmem_bytes, dW, stream]
+                (T2* d_data) {
+        ThunderFFT_benchmark_reg_e2e<T, N, true>
+            <<<grid, block, shmem_bytes, 0>>>(d_data, d_data, nullptr);
+        CHECK_CUDA(cudaGetLastError());
+    };
 
     // auto kernel_half = [grid, block, shmem_bytes, dW_half, stream]
     //             (half2* d_data, unsigned int inside_repeats) {
@@ -98,7 +152,7 @@ void thunderfft_benchmark_reg(vec2_t<T>* h_input, float2* baseline,
     //     CHECK_CUDA(cudaGetLastError());
     // };
 
-    benchmark_run<T, N, 4>(kernel, h_input, baseline, batch, "th_r");
+    benchmark_run<T, N, 4>(kernel, kernel_e2e, h_input, baseline, batch, "th_r");
     CHECK_CUDA(cudaStreamDestroy(stream));
 }
 
@@ -125,14 +179,8 @@ __global__ void ThunderFFT_benchmark_smem(
 
     // Define layout type
     // N, BPB, ElemStride, BatchStride, PadPeriod, Pad, Reversed
-    
-    //N==64
-    // using L_in = layout_t<N, BPB, 1, N, 64, 4, true>;
-    // using L_out = layout_t<N, BPB, 1, N, 16, 1, false>;
-
-    //N==1024
-    using L_in = layout_t<N, BPB, 1, N, 64, 4, true>;
-    using L_out = layout_t<N, BPB, 1, N, 64, 1, false>;
+    using L_in = typename bench_layout<N, BPB>::L_in;
+    using L_out = typename bench_layout<N, BPB>::L_out;
 
     ThunderFFT_gmem2smem<T, L_in>(s_in, d_input);
     __syncthreads();
@@ -152,6 +200,44 @@ __global__ void ThunderFFT_benchmark_smem(
     ThunderFFT_smem2gmem<T, L_out>(d_output, s_in);
     __syncthreads();
 
+}
+
+template <typename T, int N, bool forward>
+__global__ void ThunderFFT_benchmark_smem_e2e(
+    vec2_t<T>*       d_input,
+    vec2_t<T>*       d_output,
+    const T*         __restrict__ dW)  {
+    constexpr int BPB = batch_per_block<N>;
+    constexpr int WPB = warp_per_block<N>;
+    constexpr int ept = N * BPB / (threads_per_warp * WPB);
+
+    extern __shared__ __align__(16) unsigned char _smem[];
+    vec2_t<T>* s_in = reinterpret_cast<vec2_t<T>*>(_smem);
+
+    vec2_t<T> reg[ept];
+
+    vec2_t<T> W[36];
+    if constexpr (std::is_same_v<T, half>) {
+        unit_fp16::make_reg_b_precompute<N, forward>(W);
+    }
+
+    using L_in = typename bench_layout<N, BPB>::L_in;
+    using L_out = typename bench_layout<N, BPB>::L_out;
+
+    ThunderFFT_gmem2smem<T, L_in>(s_in, d_input);
+    __syncthreads();
+
+    ThunderFFT_smem2reg<T, L_in>(reg, s_in);
+    __syncthreads();
+
+    ThunderFFT_kernel_reg<T, N, BPB, forward>(reg, W, s_in);
+    __syncthreads();
+
+    ThunderFFT_reg2smem<T, L_out>(s_in, reg);
+    __syncthreads();
+
+    ThunderFFT_smem2gmem<T, L_out>(d_output, s_in);
+    __syncthreads();
 }
 
 template <typename T, unsigned int N>
@@ -185,6 +271,12 @@ void thunderfft_benchmark_smem(vec2_t<T>* h_input, float2* baseline,
             <<<grid, block, shmem_bytes, 0>>>(d_data, d_data, nullptr, inside_repeats);
         CHECK_CUDA(cudaGetLastError());
     };
+    auto kernel_e2e = [grid, block, shmem_bytes, dW, stream]
+                (T2* d_data) {
+        ThunderFFT_benchmark_smem_e2e<T, N, true>
+            <<<grid, block, shmem_bytes, 0>>>(d_data, d_data, nullptr);
+        CHECK_CUDA(cudaGetLastError());
+    };
 
     // auto kernel_half = [grid, block, shmem_bytes, dW_half, stream]
     //             (half2* d_data, unsigned int inside_repeats) {
@@ -193,7 +285,7 @@ void thunderfft_benchmark_smem(vec2_t<T>* h_input, float2* baseline,
     //     CHECK_CUDA(cudaGetLastError());
     // };
 
-    benchmark_run<T, N, 4>(kernel, h_input, baseline, batch, "th_s");
+    benchmark_run<T, N, 4>(kernel, kernel_e2e, h_input, baseline, batch, "th_s");
     CHECK_CUDA(cudaStreamDestroy(stream));
 }
 }

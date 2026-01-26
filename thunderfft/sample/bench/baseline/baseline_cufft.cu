@@ -42,6 +42,7 @@ void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch) {
     cufftPlan1d(&plan, N, CUFFT_C2C, batch);
 
     auto kernel = [&](unsigned int inside_repeats) {
+        (void)inside_repeats;
         cufftExecC2C(plan, (cufftComplex *)d_input, (cufftComplex *)d_output,
                      CUFFT_FORWARD);
         // assert("4096 half is not supported" && false);
@@ -59,8 +60,7 @@ void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch) {
                       /*radix*/ 0, // baseline이라 없음
                       /*B*/ static_cast<unsigned>(batch),
                       /*max_err*/ 0.0,
-                      /*comp_ms*/ 0.0,
-                      /*comm_ms*/ 0.0,
+                      /*compute_ms*/ 0.0,
                       /*e2e_ms*/ elapsedTime});
 
     cudaFree(d_input);

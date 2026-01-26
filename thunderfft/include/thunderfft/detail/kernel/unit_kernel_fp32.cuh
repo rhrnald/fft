@@ -428,7 +428,7 @@ void smem2reg(vec2_t<float>* reg,
               int stride = 1)
 {
     int laneid = threadIdx.x % threads_per_warp;
-    int block_id = blockIdx.x;
+    // int block_id = blockIdx.x;
     int ept = 32; // N * batch / threads_per_warp
 
     int b =  ((laneid>>1) & 1);

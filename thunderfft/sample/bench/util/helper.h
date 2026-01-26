@@ -41,10 +41,36 @@ float measure_execution_ms(Kernel &&kernel, const unsigned int warm_up_runs,
     return time / runs;
 }
 
+template <typename Kernel>
+float measure_execution_ms_once(Kernel &&kernel,
+                                const unsigned int warm_up_runs,
+                                const unsigned int runs) {
+    cudaEvent_t startEvent, stopEvent;
+    CUDA_CHECK_AND_EXIT(cudaEventCreate(&startEvent));
+    CUDA_CHECK_AND_EXIT(cudaEventCreate(&stopEvent));
+    CUDA_CHECK_AND_EXIT(cudaDeviceSynchronize());
+
+    for (size_t i = 0; i < warm_up_runs; i++) {
+        kernel();
+    }
+    CUDA_CHECK_AND_EXIT(cudaDeviceSynchronize());
+
+    CUDA_CHECK_AND_EXIT(cudaEventRecord(startEvent));
+    for (size_t i = 0; i < runs; i++) {
+        kernel();
+    }
+    CUDA_CHECK_AND_EXIT(cudaEventRecord(stopEvent));
+    CUDA_CHECK_AND_EXIT(cudaDeviceSynchronize());
+
+    float time;
+    CUDA_CHECK_AND_EXIT(cudaEventElapsedTime(&time, startEvent, stopEvent));
+    CUDA_CHECK_AND_EXIT(cudaEventDestroy(startEvent));
+    CUDA_CHECK_AND_EXIT(cudaEventDestroy(stopEvent));
+    return time / runs;
+}
 struct PerfStat {
-    double comp_ms;
+    double compute_ms;
     double e2e_ms;
-    double comm_ms;
 };
 
 template <typename T>
@@ -80,37 +106,37 @@ float check_max_abs_err(const float2 *ref, const T *test, int N) {
         float abs_err = sqrtf(dx * dx + dy * dy);
         if (abs_err > max_abs_err)
             max_abs_err = abs_err;
-        if (i < 1024 && abs_err >1.0) {
-            printf("mismatch at %d: ref=(%f,%f), test=(%f,%f), abs_err=%f\n",
-                   i, ref[i].x, ref[i].y, tf.x, tf.y, abs_err);
-        }
+        // if (i < 1024 && abs_err >1.0) {
+        //     printf("mismatch at %d: ref=(%f,%f), test=(%f,%f), abs_err=%f\n",
+        //            i, ref[i].x, ref[i].y, tf.x, tf.y, abs_err);
+        // }
     }
 
     return max_abs_err;
 }
 
-template <typename T, unsigned int N, typename Kernel>
-static inline PerfStat benchmark_perf(Kernel &&kernel, vec2_t<T> *d_data,
-                                      int batch) {
+template <typename T, unsigned int N, typename Kernel, typename KernelE2E>
+static inline PerfStat benchmark_perf(Kernel &&kernel, KernelE2E &&kernel_e2e,
+                                      vec2_t<T> *d_data, int batch) {
     // return {0,0,0};
     static constexpr unsigned int inside_repeats = 1000;
     static constexpr unsigned int kernel_runs = 1;
     static constexpr unsigned int warm_up_runs = 1;
 
-    // R 회와 2R 회를 이용해 per-iteration kernel-only 시간 산출
     double t_R =
         measure_execution_ms(kernel, warm_up_runs, kernel_runs, inside_repeats);
 
     double t_2R = measure_execution_ms(kernel, warm_up_runs, kernel_runs,
                                        2 * inside_repeats);
 
-    double comp_ms = (t_2R - t_R) / static_cast<double>(inside_repeats);
+    double compute_ms = (t_2R - t_R) / static_cast<double>(inside_repeats);
 
-    double e2e_ms = measure_execution_ms(kernel, 1, 1, 1);
+    auto e2e_wrapper = [&kernel_e2e, d_data]() { kernel_e2e(d_data); };
+    static constexpr unsigned int e2e_warm_up_runs = 1;
+    static constexpr unsigned int e2e_runs = 10;
+    double e2e_ms = measure_execution_ms_once(e2e_wrapper, e2e_warm_up_runs, e2e_runs);
 
-    double comm_ms = measure_execution_ms(kernel, warm_up_runs, kernel_runs, 0);
-
-    return {comp_ms, e2e_ms, comm_ms};
+    return {compute_ms, e2e_ms};
 }
 
 template <typename T, unsigned int N, typename Kernel>
@@ -123,8 +149,9 @@ static inline void benchmark_val(Kernel &&kernel, vec2_t<T> *d_data,
     measure_execution_ms(kernel, warm_up_runs, kernel_runs, inside_repeats);
 }
 
-template <typename T, unsigned int N, unsigned int radix, typename Kernel>
-void benchmark_run(Kernel &&kernel, vec2_t<T> *h_data, float2 *baseline,
+template <typename T, unsigned int N, unsigned int radix, typename Kernel, typename KernelE2E>
+void benchmark_run(Kernel &&kernel, KernelE2E &&kernel_e2e,
+                   vec2_t<T> *h_data, float2 *baseline,
                    unsigned int B, std::string name = "") {
     using T2 = vec2_t<T>;
 
@@ -150,11 +177,11 @@ void benchmark_run(Kernel &&kernel, vec2_t<T> *h_data, float2 *baseline,
 
     const double max_err =
         static_cast<double>(check_max_abs_err(baseline, h_custom, N * B));
-    const PerfStat perf = benchmark_perf<T, N>(kernel_wrapper, d_custom, B);
+    const PerfStat perf = benchmark_perf<T, N>(kernel_wrapper, kernel_e2e, d_custom, B);
 
     std::string label = name + "(" + std::string(bench_type_cstr<T>()) + ")";
-    stat::push(stat::RunStat{label, N, radix, B, max_err, perf.comp_ms,
-                             perf.comm_ms, perf.e2e_ms});
+    stat::push(stat::RunStat{label, N, radix, B, max_err, perf.compute_ms,
+                             perf.e2e_ms});
 
     CHECK_CUDA(cudaFree(d_custom));
     std::free(h_custom);
