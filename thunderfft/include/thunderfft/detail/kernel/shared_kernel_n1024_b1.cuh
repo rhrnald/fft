@@ -17,34 +17,16 @@ ThunderFFT_kernel_reg<float, 1024, 1, true>(vec2_t<float>* __restrict__ reg, vec
     __syncthreads();
 
     for(int i=0; i<ept/2; i++) {
-        int row = i%4 * 4 + (laneid%4);
+        int row = (i%4) * 4 + (laneid%4);
         int rev_row = i%4 + (laneid%4)*4;
 
-        // int col0 = (laneid/4) %4 + (laneid/16)*16;
-        // int col1 = col0 + 16;
-
-        // int index0 = row * 64 + col0; index0 += index0/L_in::pad_period * L_in::pad;
-        // int index1 = row * 64 + col1; index1 += index1/L_in::pad_period * L_in::pad;
-
-        // reg[i] = smem[index0];
-        // reg[i+ept/2] = smem[index1];
         
-        // reg[i] = cmul(reg[i], W(col0 * rev_row, 1024));
-        // reg[i+ept/2] = cmul(reg[i+ept/2], W(col1 * rev_row, 1024));
+        int col0 = (laneid/4) %4 + (laneid/16)*8 + (i/4) * 16;
+        int col1 = col0 + 4;
 
-        
-
-        // int col0 = laneid/4 + (i/4) * 16;
-        // int col1 = col0 + 8;
-
-        // int col0 = (laneid/4) %4 + (laneid/16)*16 + (i/4) * 4;
-        // int col1 = col0 + 32;
-        
-        int col0 = (laneid/4) %2 + (laneid/8)*8 + (i/4) * 2;
-        int col1 = col0 + 32;
-
-        int index0 = row * 64 + col0; index0 += index0/L_in::pad_period * L_in::pad;
+        int index0 = row * 64 + col0; index0 += index0/L_in::pad_period * L_in::pad;    
         int index1 = row * 64 + col1; index1 += index1/L_in::pad_period * L_in::pad;
+        
 
         reg[i] = smem[index0];
         reg[i+ept/2] = smem[index1];
@@ -77,8 +59,8 @@ ThunderFFT_kernel_reg<float, 1024, 1, false>(vec2_t<float>* __restrict__ reg, ve
         int row = i%4 * 4 + (laneid%4);
         int rev_row = reverse_bit_groups<2,4>(row);
 
-        int col0 = (laneid/4) %2 + (laneid/8)*8 + (i/4) * 2;
-        int col1 = col0 + 32;
+        int col0 = (laneid/4) %4 + (laneid/16)*8 + (i/4) * 16;
+        int col1 = col0 + 4;
 
         int index0 = row * 64 + col0; index0 += index0/L_in::pad_period * L_in::pad;
         int index1 = row * 64 + col1; index1 += index1/L_in::pad_period * L_in::pad;
@@ -124,9 +106,17 @@ ThunderFFT_kernel_reg<half, 1024, 1, true>(vec2_t<half>* __restrict__ reg, vec2_
 
         // int col0 = (laneid/4) %4 + (laneid/16)*16 + (i/4) * 4;
         // int col1 = col0 + 32;
+
         
-        int col0 = (laneid/4) %2 + (laneid/8)*8 + (i/4) * 2;
-        int col1 = col0 + 32;
+        // int col0 = ((laneid/4) %4)*16 + (laneid/16)*2 + (i/4) * 4;
+        // int col1 = col0 + 1;
+
+        
+        int col0 = (laneid/4) %4 + (laneid/16)*8 + (i/4) * 16;
+        int col1 = col0 + 4;
+        
+        // int col0 = (laneid/4) %2 + (laneid/8)*8 + (i/4) * 2;
+        // int col1 = col0 + 32;
 
         int index0 = row * 64 + col0; index0 += index0/L_in::pad_period * L_in::pad;
         int index1 = row * 64 + col1; index1 += index1/L_in::pad_period * L_in::pad;
@@ -194,8 +184,11 @@ ThunderFFT_kernel_reg<half, 1024, 1, false>(vec2_t<half>* __restrict__ reg, vec2
         int row = i%4 * 4 + (laneid%4);
         int rev_row = i%4 + (laneid%4)*4;
 
-        int col0 = (laneid/4) %2 + (laneid/8)*8 + (i/4) * 2;
-        int col1 = col0 + 32;
+        // int col0 = (laneid/4) %2 + (laneid/8)*8 + (i/4) * 2;
+        // int col1 = col0 + 32;
+        
+        int col0 = (laneid/4) %4 + (laneid/16)*8 + (i/4) * 16;
+        int col1 = col0 + 4;
 
         int index0 = row * 64 + col0; index0 += index0/L_in::pad_period * L_in::pad;
         int index1 = row * 64 + col1; index1 += index1/L_in::pad_period * L_in::pad;
@@ -221,11 +214,22 @@ ThunderFFT_smem2reg_N1024(vec2_t<T>* __restrict__ reg,
     auto *s_0 = (smem+(laneid/4)*(64+64/sL::pad_period*sL::pad)*sL::elem_stride);
     auto *s_1 = (smem+(laneid/4+8)*(64+ 64/sL::pad_period*sL::pad)*sL::elem_stride);
 
-    for (int i = 0; i < ept / 2; i++) { 
-        reg[i] =
-            s_0[(i * 4 + (laneid % 4) ) * sL::elem_stride];
-        reg[i + ept / 2] =
-            s_1[(i * 4 + (laneid % 4) ) * sL::elem_stride];
+    if constexpr (sL::reversed) {
+        for (int i = 0; i < ept / 2; i++) { 
+            reg[i] =
+                s_0[(i * 4 + (laneid % 4) ) * sL::elem_stride];
+            reg[i + ept / 2] =
+                s_1[(i * 4 + (laneid % 4) ) * sL::elem_stride];
+        }
+    } else {
+        for (int i = 0; i < ept; i++) {
+            int row = (laneid %4)*4 + i%4;
+            int col = (laneid/4)%4*4+ (laneid/16) + (i/4)%4*16 + (i/16)*2;
+            int idx = row*64+col;
+            idx *= sL::elem_stride;
+            idx += idx/sL::pad_period*sL::pad;
+            reg[i] = smem[idx];
+        }
     }
 }
 
@@ -255,13 +259,27 @@ ThunderFFT_reg2smem_N1024(vec2_t<T>* __restrict__ smem,
     for(int i=0; i<ept/2; i++) {
         int row = i%4 + (laneid%4)*4;
         
-        int col0 = (laneid/4) %2 + (laneid/8)*8+ (i/4) * 2;
-        int col1 = col0 + 32;
         
         // int col0 = (laneid/4) %4 + (laneid/16)*16 + (i/4) * 4;
         // int col1 = col0 + 32;
 
-        // int col0 = (laneid/4) %2 + (laneid/8)*8 + (i/4) * 2;
+        // int col0, col1;
+        // if constexpr(std::is_same_v<T, float>) {
+        //     col0 = (laneid/4) %4 + (laneid/16)*8 + (i/4) * 16;
+        //     col1 = col0 + 4;
+        // } else {
+        //     col0 = (laneid/4) %4 + (laneid/16)*8 + (i/4) * 16;
+        //     col1 = col0 + 4;
+        // }
+
+        
+        int col0 = (laneid/4) %4 + (laneid/16)*8 + (i/4) * 16;
+        int col1 = col0 + 4;
+        
+        // int col0 = ((laneid/4) %4)*16 + (laneid/16)*2 + (i/4) * 4;
+        // int col1 = col0 + 1;
+
+        // int col0 = (laneid/4) %2 + (laneid/8)*8+ (i/4) * 2;
         // int col1 = col0 + 32;
 
         int idx0 = (row*64+col0)*sL::elem_stride;

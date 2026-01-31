@@ -3,28 +3,40 @@
 #include "helper.h"
 
 namespace thunderfft {
-template <int N, int BPB>
+template <typename T, int N, int BPB>
 struct bench_layout {
     using L_in = layout_t<N, BPB, 1, N, 64, 4, false>;
     using L_out = layout_t<N, BPB, 1, N, 16, 1, false>;
 };
 
-template <int BPB>
-struct bench_layout<1024, BPB> {
-    using L_in = layout_t<1024, BPB, 1, 1024, 64, 4, true>;
-    using L_out = layout_t<1024, BPB, 1, 1024, 64, 1, false>;
+template <typename T, int BPB>
+struct bench_layout<T, 1024, BPB> {
+    using L_in = std::conditional_t<std::is_same_v<T, half>,
+                                    layout_t<1024, BPB, 1, 1024, 256, 1, false>,
+                                    layout_t<1024, BPB, 1, 1024, 256, 1, false>>;
+    using L_out = std::conditional_t<std::is_same_v<T, half>,
+                                     layout_t<1024, BPB, 1, 1024, 256, 4, false>,
+                                     layout_t<1024, BPB, 1, 1024, 256, 4, false>>;
 };
 
-template <int BPB>
-struct bench_layout<128, BPB> {
-    using L_in = layout_t<128, BPB, 1, 128, 64, 4, true>;
-    using L_out = layout_t<128, BPB, 1, 128, 16, 1, false>;
+template <typename T, int BPB>
+struct bench_layout<T, 128, BPB> {
+    using L_in = std::conditional_t<std::is_same_v<T, half>,
+                                    layout_t<128, BPB, 1, 128, 64, 4, true>,
+                                    layout_t<128, BPB, 1, 128, 64, 4, true>>;
+    using L_out = std::conditional_t<std::is_same_v<T, half>,
+                                     layout_t<128, BPB, 1, 128, 16, 1, false>,
+                                     layout_t<128, BPB, 1, 128, 16, 1, false>>;
 };
 
-template <int BPB>
-struct bench_layout<4096, BPB> {
-    using L_in = layout_t<4096, BPB, 1, 4096, 16, 1, true>;
-    using L_out = layout_t<4096, BPB, 1, 4096, 16, 1, false>;
+template <typename T, int BPB>
+struct bench_layout<T, 4096, BPB> {
+    using L_in = std::conditional_t<std::is_same_v<T, half>,
+                                    layout_t<4096, BPB, 1, 4096, 16, 1, true>,
+                                    layout_t<4096, BPB, 1, 4096, 16, 1, true>>;
+    using L_out = std::conditional_t<std::is_same_v<T, half>,
+                                     layout_t<4096, BPB, 1, 4096, 16, 1, false>,
+                                     layout_t<4096, BPB, 1, 4096, 16, 1, false>>;
 };
 
 template <typename T, int N, bool forward>
@@ -42,8 +54,8 @@ __global__ void ThunderFFT_benchmark_reg(
 
     vec2_t<T> reg[ept];
 
-    using L_in = typename bench_layout<N, BPB>::L_in;
-    using L_out = typename bench_layout<N, BPB>::L_out;
+    using L_in = typename bench_layout<T, N, BPB>::L_in;
+    using L_out = typename bench_layout<T, N, BPB>::L_out;
 
     
     vec2_t<T> W[36];
@@ -85,8 +97,8 @@ __global__ void ThunderFFT_benchmark_reg_e2e(
 
     vec2_t<T> reg[ept];
 
-    using L_in = typename bench_layout<N, BPB>::L_in;
-    using L_out = typename bench_layout<N, BPB>::L_out;
+    using L_in = typename bench_layout<T, N, BPB>::L_in;
+    using L_out = typename bench_layout<T, N, BPB>::L_out;
 
     vec2_t<T> W[36];
     if constexpr (std::is_same_v<T, half>) {
@@ -170,8 +182,8 @@ __global__ void ThunderFFT_benchmark_smem(
         unit_fp16::make_reg_b_precompute<N, forward>(W);
     }
 
-    using L_in = typename bench_layout<N, BPB>::L_in;
-    using L_out = typename bench_layout<N, BPB>::L_out;
+    using L_in = typename bench_layout<T, N, BPB>::L_in;
+    using L_out = typename bench_layout<T, N, BPB>::L_out;
 
     ThunderFFT_gmem2smem<T, L_in>(s_in, d_input);
     __syncthreads();
@@ -212,8 +224,8 @@ __global__ void ThunderFFT_benchmark_smem_e2e(
         unit_fp16::make_reg_b_precompute<N, forward>(W);
     }
 
-    using L_in = typename bench_layout<N, BPB>::L_in;
-    using L_out = typename bench_layout<N, BPB>::L_out;
+    using L_in = typename bench_layout<T, N, BPB>::L_in;
+    using L_out = typename bench_layout<T, N, BPB>::L_out;
 
     ThunderFFT_gmem2smem<T, L_in>(s_in, d_input);
     __syncthreads();
