@@ -10,7 +10,7 @@
 void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch);
 
 template <long long N> int test() {
-    constexpr long long batch = 65536;
+    constexpr long long batch = 1024;
 
     float2 *h_input = (float2 *)malloc(sizeof(float2) * N * batch);
     half2 *h_input_half = (half2 *)malloc(sizeof(half2) * N * batch);

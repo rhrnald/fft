@@ -13,9 +13,9 @@ inline void ThunderFFT_global(vec2_t<T>* d_input,
   constexpr int BPB   = batch_per_block<N>;
   constexpr int WPB   = warp_per_block<N>;
 
-    constexpr dim3 grid ( batch  / BPB );
-    constexpr dim3 block( threads_per_warp, WPB );
-    constexpr size_t shmem_bytes = ( sizeof(T) * 2 ) * (N+pad_h(N)) * BPB;
+    dim3 grid((batch + BPB - 1) / BPB);
+    dim3 block(threads_per_warp, WPB);
+    constexpr size_t shmem_bytes = (sizeof(T) * 2) * (N + pad_h(N)) * BPB;
 
     CHECK_CUDA(cudaFuncSetAttribute(
         detail::ThunderFFT_global_kernel<T, N, forward>,
@@ -24,7 +24,7 @@ inline void ThunderFFT_global(vec2_t<T>* d_input,
     ));
     
     detail::ThunderFFT_global_kernel<T, N, forward>
-            <<<grid, block, shmem_bytes>>>(d_input, d_output, batch);
+            <<<grid, block, shmem_bytes, stream>>>(d_input, d_output, batch);
 
     cudaStreamSynchronize(stream);
 }

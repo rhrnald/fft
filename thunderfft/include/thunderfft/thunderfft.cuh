@@ -84,7 +84,7 @@ static T* preprocess_W(int N);
 // --------------------------------------------
 // Loads one logical FFT fragment from global memory into per-thread registers.
 // - reg  : destination register buffer
-// - gmem : source global memory buffer (read-only)
+// - gmem : source global memory buffer (read-only), block-local base pointer
 template <typename T, int N, int batch>
 __device__ __forceinline__ void
 ThunderFFT_gmem2reg(vec2_t<T>* __restrict__ reg,
@@ -95,7 +95,7 @@ ThunderFFT_gmem2reg(vec2_t<T>* __restrict__ reg,
 // Register file -> global memory
 // --------------------------------------------
 // Stores one logical FFT fragment from per-thread registers to global memory.
-// - gmem : destination global memory buffer
+// - gmem : destination global memory buffer, block-local base pointer
 // - reg  : source register buffer (read-only)
 template <typename T, int N, int batch>
 __device__ __forceinline__ void

@@ -12,15 +12,16 @@ ThunderFFT_gmem2smem(vec2_t<T>* __restrict__ smem,
 
     int tidx = threadIdx.x + threadIdx.y * blockDim.x;
     int block_size = blockDim.x * blockDim.y;
-    for (unsigned i = 0; i < batch; i++) {
-        for(unsigned j=tidx; j<N; j+= block_size) {
+    for (int i = 0; i < batch; i++) {
+        for(int _j=0; _j<N; _j+= threads_per_warp * warp_per_block<N>) {
+            int j = _j + tidx;
             int smem_idx = i * batch_stride + j * elem_stride;
             smem_idx = smem_idx + smem_idx/pad_period * pad;
 
             if constexpr(sL::reversed) {
-                smem[smem_idx] = gmem[blockIdx.x * batch * N + i * N + reverse_bit_groups<2,LOG2P_builtin<N>>(j)];
+                smem[smem_idx] = gmem[i * N + reverse_bit_groups<2,LOG2P_builtin<N>>(j)];
             } else {
-                smem[smem_idx] = gmem[blockIdx.x * batch * N + i * N + j];
+                smem[smem_idx] = gmem[i * N + j];
             }
               // s_in[i * (N+pad)+ j] = d_input[b * N * batch_per_block + i * N + j];
         }
@@ -47,9 +48,9 @@ ThunderFFT_smem2gmem(vec2_t<T>* __restrict__ gmem,
 
             if constexpr(sL::reversed) {
                 // assertion(false && "Output must not be reversed");
-                gmem[blockIdx.x * batch * N + i * N + reverse_bit_groups<2,LOG2P_builtin<N>>(j)] = smem[smem_idx];
+                // gmem[i * N + reverse_bit_groups<2,LOG2P_builtin<N>>(j)] = smem[smem_idx];
             } else {
-                gmem[blockIdx.x * batch * N + i * N + j] = smem[smem_idx];
+                gmem[i * N + j] = smem[smem_idx];
             }
               // s_in[i * (N+pad)+ j] = d_input[b * N * batch_per_block + i * N + j];
         }
@@ -137,7 +138,8 @@ template <typename T, int N, int batch>
 __device__ __forceinline__ void
 ThunderFFT_gmem2reg(vec2_t<T>* __restrict__ reg,
                     const vec2_t<T>* __restrict__ gmem) {
-    using L = layout_t<N, batch, 1, N, 64, 0, false>;
+    // gmem points to the block-local base (caller applies blockIdx offset).
+    using L = layout_t<N, batch, 1, N, 1, 0, false>;
     ThunderFFT_smem2reg<T, L>(reg, gmem);
 }
 
@@ -145,7 +147,9 @@ template <typename T, int N, int batch>
 __device__ __forceinline__ void
 ThunderFFT_reg2gmem(vec2_t<T>* __restrict__ gmem,
                     const vec2_t<T>* __restrict__ reg) {
-    using L = layout_t<N, batch, 1, N, 64, 0, false>;
+    // gmem points to the block-local base (caller applies blockIdx offset).
+    using L = layout_t<N, batch, 1, N, 1, 0, false>;
     ThunderFFT_reg2smem<T, L>(gmem, reg);
 }
+
 } // namespace thunderfft

@@ -46,8 +46,8 @@ __device__ __constant__ const half2*  d_twiddle_h   = nullptr;
 __device__ __constant__ int           d_twiddle_N_h = 0;
 
 // N-independent unit twiddle (lane-dependent!) - keep as is
-__device__ __constant__ half2  d_unit_twiddle_half2[UNIT_W_SIZE];
-__device__ __constant__ float2 d_unit_twiddle_float2[UNIT_W_SIZE];
+__device__ half2  d_unit_twiddle_half2[UNIT_W_SIZE];
+__device__ float2 d_unit_twiddle_float2[UNIT_W_SIZE];
 
 } // namespace detail
 

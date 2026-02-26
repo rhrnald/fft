@@ -6,8 +6,8 @@ namespace thunderfft::detail {
 //   (3) registers -> gmem
 //
 // Assumptions:
-// - ThunderFFT_gmem2reg / ThunderFFT_reg2gmem know how to map threadIdx/blockIdx
-//   to the logical FFT fragment for the given N and batch policy.
+// - ThunderFFT_gmem2reg / ThunderFFT_reg2gmem expect block-local base pointers
+//   and map only threadIdx to the logical FFT fragment.
 // - ThunderFFT_kernel_reg performs the in-register FFT on the per-thread reg buffer.
 //
 // If your implementation expects separate input/output pointers inside gmem2reg/reg2gmem,
@@ -32,7 +32,7 @@ __global__ void ThunderFFT_global_kernel(const vec2_t<T>* __restrict__ d_input,
     using L_in = layout_t<N, BPB, 1, N, 64, 4, true>;
     using L_out = layout_t<N, BPB, 1, N, 16, 1, false>;
 
-    ThunderFFT_gmem2smem<T, L_in>(s_in, d_input);
+    ThunderFFT_gmem2smem<T, L_in>(s_in, d_input + blockIdx.x * BPB * N);
     __syncthreads();
 
     ThunderFFT_smem2reg<T, L_in>(reg, s_in);
@@ -44,7 +44,7 @@ __global__ void ThunderFFT_global_kernel(const vec2_t<T>* __restrict__ d_input,
     ThunderFFT_reg2smem<T, L_out>(s_in, reg);
     __syncthreads();
 
-    ThunderFFT_smem2gmem<T, L_out>(d_output, s_in);
+    ThunderFFT_smem2gmem<T, L_out>(d_output + blockIdx.x * BPB * N, s_in);
     __syncthreads();
 
 }
