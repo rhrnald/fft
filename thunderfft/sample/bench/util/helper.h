@@ -13,6 +13,10 @@
         }                                                                      \
     }
 
+#ifndef THUNDERFFT_INSIDE_REPEATS
+#define THUNDERFFT_INSIDE_REPEATS 1000
+#endif
+
 template <typename Kernel>
 float measure_execution_ms(Kernel &&kernel, const unsigned int warm_up_runs,
                            const unsigned int runs,
@@ -119,7 +123,7 @@ template <typename T, unsigned int N, typename Kernel, typename KernelE2E>
 static inline PerfStat benchmark_perf(Kernel &&kernel, KernelE2E &&kernel_e2e,
                                       vec2_t<T> *d_data, int batch) {
     // return {0,0,0};
-    static constexpr unsigned int inside_repeats = 1000;
+    static constexpr unsigned int inside_repeats = THUNDERFFT_INSIDE_REPEATS;
     static constexpr unsigned int kernel_runs = 1;
     static constexpr unsigned int warm_up_runs = 1;
 

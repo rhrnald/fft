@@ -27,9 +27,11 @@ __global__ void ThunderFFT_global_kernel(const vec2_t<T>* __restrict__ d_input,
 
     vec2_t<T> reg[ept];
 
-    // Define layout type
-    // N, BPB, ElemStride, BatchStride, PadPeriod, Pad, Reversed
-    using L_in = layout_t<N, BPB, 1, N, 64, 4, true>;
+    // The radix-2 block kernels for 512/2048/4096 consume natural-order input.
+    using L_in = std::conditional_t<
+        (N == 512 || N == 2048 || N == 4096),
+        layout_t<N, BPB, 1, N, 16, 1, false>,
+        layout_t<N, BPB, 1, N, 64, 4, true>>;
     using L_out = layout_t<N, BPB, 1, N, 16, 1, false>;
 
     ThunderFFT_gmem2smem<T, L_in>(s_in, d_input + blockIdx.x * BPB * N);

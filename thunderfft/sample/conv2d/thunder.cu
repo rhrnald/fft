@@ -13,26 +13,26 @@
 
 using namespace cute;
 
-template <typename T> __device__ void swap_vals(T &a, T &b) {
-    T tmp = a;
-    a = b;
-    b = tmp;
-}
+// template <typename T> __device__ void swap_vals(T &a, T &b) {
+//     T tmp = a;
+//     a = b;
+//     b = tmp;
+// }
 
-template <typename T> __device__ void swap_thread_data(T *thread_data) {
-    swap_vals(thread_data[1], thread_data[4]);
-    swap_vals(thread_data[17], thread_data[20]);
-    swap_vals(thread_data[2], thread_data[8]);
-    swap_vals(thread_data[18], thread_data[24]);
-    swap_vals(thread_data[3], thread_data[12]);
-    swap_vals(thread_data[19], thread_data[28]);
-    swap_vals(thread_data[6], thread_data[9]);
-    swap_vals(thread_data[22], thread_data[25]);
-    swap_vals(thread_data[7], thread_data[13]);
-    swap_vals(thread_data[23], thread_data[29]);
-    swap_vals(thread_data[11], thread_data[14]);
-    swap_vals(thread_data[27], thread_data[30]);
-}
+// template <typename T> __device__ void swap_thread_data(T *thread_data) {
+//     swap_vals(thread_data[1], thread_data[4]);
+//     swap_vals(thread_data[17], thread_data[20]);
+//     swap_vals(thread_data[2], thread_data[8]);
+//     swap_vals(thread_data[18], thread_data[24]);
+//     swap_vals(thread_data[3], thread_data[12]);
+//     swap_vals(thread_data[19], thread_data[28]);
+//     swap_vals(thread_data[6], thread_data[9]);
+//     swap_vals(thread_data[22], thread_data[25]);
+//     swap_vals(thread_data[7], thread_data[13]);
+//     swap_vals(thread_data[23], thread_data[29]);
+//     swap_vals(thread_data[11], thread_data[14]);
+//     swap_vals(thread_data[27], thread_data[30]);
+// }
 
 // ----------------------------
 // Kernel: half2 input/output, float2(or cufftComplex) filter

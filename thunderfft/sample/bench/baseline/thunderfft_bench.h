@@ -1,5 +1,5 @@
 #include "../../../include/thunderfft/thunderfft.cuh"
-#include "../../../include/thunderfft/thunderfft_layout.h"
+#include "../../../include/thunderfft/thunderfft_layout_tuned.h"
 
 #include "helper.h"
 
@@ -35,6 +35,7 @@ __global__ void ThunderFFT_benchmark_reg(
     ThunderFFT_smem2reg<T, L_in>(reg, s_in);
     __syncthreads();
 
+
     // ThunderFFT_gmem2reg<T, N, BPB>(reg, d_input+blockIdx.x * BPB * N);
 
     #pragma unroll 1
@@ -43,13 +44,13 @@ __global__ void ThunderFFT_benchmark_reg(
         __syncthreads();
     }
 
-    // ThunderFFT_reg2smem<T, L_out>(s_in, reg);
-    // __syncthreads();
+    ThunderFFT_reg2smem<T, L_out>(s_in, reg);
+    __syncthreads();
 
-    // ThunderFFT_smem2gmem<T, L_out>(d_output + blockIdx.x * BPB * N, s_in);
-    // __syncthreads();
+    ThunderFFT_smem2gmem<T, L_out>(d_output + blockIdx.x * BPB * N, s_in);
+    __syncthreads();
 
-    ThunderFFT_reg2gmem<T, N, BPB>(d_output+blockIdx.x * BPB * N, reg);
+    // ThunderFFT_reg2gmem<T, N, BPB>(d_output+blockIdx.x * BPB * N, reg);
 
 }
 
@@ -81,7 +82,6 @@ __global__ void ThunderFFT_benchmark_reg_e2e(
     ThunderFFT_smem2reg<T, L_in>(reg, s_in);
     __syncthreads();
 
-    // ThunderFFT_gmem2reg<T, N, BPB>(reg, d_input+blockIdx.x * BPB * N);
 
     ThunderFFT_kernel_reg<T, N, BPB, forward>(reg, (vec2_t<T>*)W, s_in);
     __syncthreads();
@@ -93,8 +93,6 @@ __global__ void ThunderFFT_benchmark_reg_e2e(
     ThunderFFT_smem2gmem<T, L_out>(d_output + blockIdx.x * BPB * N, s_in);
     __syncthreads();
 
-
-    // ThunderFFT_reg2gmem<T, N, BPB>(d_output+blockIdx.x * BPB * N, reg);
 }
 
 template <typename T, unsigned int N>
@@ -163,6 +161,8 @@ __global__ void ThunderFFT_benchmark_smem(
 
     ThunderFFT_gmem2smem<T, L_in>(s_in, d_input + blockIdx.x * BPB * N);
     __syncthreads();
+
+
 
     #pragma unroll 1
     for(int i=0; i<inside_repeats; i++) {

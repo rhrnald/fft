@@ -6,29 +6,63 @@ ThunderFFT_kernel_reg<float, 256, 16, true>(vec2_t<float>* __restrict__ reg, vec
     int warpid = threadIdx.y;
 
     int ept = 32;
-    
+
     vec2_t<float> *smem = (vec2_t<float>*)workspace;
     thunderfft::unit::fft_kernel_r64_b16<true>((float*)reg);
 
-    thunderfft::unit::reg2smem(reg, smem+((laneid/4) + warpid * 16)*(64+4), smem + ((laneid/4+8) + warpid*16)*(64+4), 1);
+    // thunderfft::unit::reg2smem(reg, smem+((laneid/4) + warpid * 16)*(64+4), smem + ((laneid/4+8) + warpid*16)*(64+4), 1);
+    {
+        const int pad_period=64, pad=1;
+        int batch0 = (laneid/4);
+        int batch1 = (laneid/4+8);
 
-    __syncthreads();
+        for (int i = 0; i < ept / 2; i++) {
+            // int idx = i*4 + (laneid % 4)*64 + warpid;
+            int idx = i + warpid * 16 + (laneid % 4)*64;
 
-    auto s_out_0 = smem + (laneid/4) * (256 + 16);
-    auto s_out_1 = smem + (laneid/4+8) * (256 + 16);
+            int idx0 = batch0*256+idx;
+            int idx1 = batch1*256+idx;
+            idx0 = idx0 + idx0/pad_period*pad;
+            idx1 = idx1 + idx1/pad_period*pad;
 
-    for(int i=0; i<4; i++) {
-        int index_pad = (laneid%4) + i*4 + warpid*17;
-        int index = (laneid%4) + i*4 + warpid*16;
-        for(int j=0; j<4; j++) {
-            reg[i*4+j] = s_out_0[index_pad + j*(64+4)];
-            reg[i*4+j+16] = s_out_1[index_pad + j*(64+4)];
-            
-            // reg[i*4+j] = s_out_0[0];
-            // reg[i*4+j+16] = s_out_1[0];
-            
-            rotate(reg[i*4+j], index * j, 256);
-            rotate(reg[i*4+j+16], index * j, 256); 
+            smem[idx0] = reg[i];
+            smem[idx1] = reg[i + ept / 2];
+        }
+
+        // __syncthreads();
+
+        // if(threadIdx.y==0 && blockIdx.x==0) {
+        //     int idx = batch0+4*((laneid % 4)*16) + warpid;
+        //     idx = idx + idx/pad_period*pad;
+        //     printf("%d %d %d\n", laneid, idx, idx%32);
+        // }
+        // __syncthreads();
+
+        __syncthreads();
+
+        for(int i=0; i<4; i++) {
+            for(int j=0; j<4; j++) {
+                // int x= (laneid%4) *16 + warpid*4 + i;
+                int x= (laneid%4) + warpid*4 + i*16;
+                // int index = j + 4*x;
+                int index = (laneid%4) + warpid*4 + j*16 + i * 64;
+
+                int index0 = batch0*256 + index;
+                int index1 = batch1*256 + index;
+                index0 = index0 + index0/pad_period*pad;
+                index1 = index1 + index1/pad_period*pad;
+
+                reg[i*4+j] = smem[index0];
+                reg[i*4+j+16] = smem[index1];
+                
+                // reg[i*4+j] = s_out_0[0];
+                // reg[i*4+j+16] = s_out_1[0];
+                
+                if (j != 0) {
+                    rotate(reg[i*4+j], x * j, 256);
+                    rotate(reg[i*4+j+16], x * j, 256);
+                }
+            }
         }
     }
 
@@ -52,7 +86,6 @@ ThunderFFT_kernel_reg<float, 256, 16, true>(vec2_t<float>* __restrict__ reg, vec
     
     __syncthreads();
 
-    
     // __syncthreads();
     // if(threadIdx.x == 1 && threadIdx.y==0 && blockIdx.x==0) {
     //     for(int i=0; i<32; i++) {
@@ -92,8 +125,10 @@ ThunderFFT_kernel_reg<float, 256, 16, false>(vec2_t<float>* __restrict__ reg, ve
             reg[i*4+j] = s_out_0[index_pad + j*(64+4)];
             reg[i*4+j+16] = s_out_1[index_pad + j*(64+4)];
             
-            rotate(reg[i*4+j], -index * j, 256);
-            rotate(reg[i*4+j+16], -index * j, 256); 
+            if (j != 0) {
+                rotate(reg[i*4+j], -index * j, 256);
+                rotate(reg[i*4+j+16], -index * j, 256);
+            }
         }
     }
 
@@ -129,25 +164,58 @@ ThunderFFT_kernel_reg<half, 256, 16, true>(vec2_t<half>* __restrict__ reg, vec2_
     vec2_t<half> *smem = (vec2_t<half>*)workspace;
     thunderfft::unit_fp16::fft_kernel_r64_b16<true>((vec2_t<half>*)reg, W_precompute);
 
-    thunderfft::unit_fp16::reg2smem(reg, smem+((laneid/4) + warpid * 16)*(64+4), smem + ((laneid/4+8) + warpid*16)*(64+4), 1);
+    {
+        const int pad_period=64, pad=1;
+        int batch0 = (laneid/4);
+        int batch1 = (laneid/4+8);
 
-    __syncthreads();
+        for (int i = 0; i < ept / 2; i++) {
+            // int idx = i*4 + (laneid % 4)*64 + warpid;
+            int idx = i + warpid * 16 + (laneid % 4)*64;
 
-    auto s_out_0 = smem + (laneid/4) * (256 + 16);
-    auto s_out_1 = smem + (laneid/4+8) * (256 + 16);
+            int idx0 = batch0*256+idx;
+            int idx1 = batch1*256+idx;
+            idx0 = idx0 + idx0/pad_period*pad;
+            idx1 = idx1 + idx1/pad_period*pad;
 
-    for(int i=0; i<4; i++) {
-        int index_pad = (laneid%4) + i*4 + warpid*17;
-        int index = (laneid%4) + i*4 + warpid*16;
-        for(int j=0; j<4; j++) {
-            reg[i*4+j] = s_out_0[index_pad + j*(64+4)];
-            reg[i*4+j+16] = s_out_1[index_pad + j*(64+4)];
-            
-            // reg[i*4+j] = s_out_0[0];
-            // reg[i*4+j+16] = s_out_1[0];
-            
-            rotate(reg[i*4+j], index * j, 256);
-            rotate(reg[i*4+j+16], index * j, 256); 
+            smem[idx0] = reg[i];
+            smem[idx1] = reg[i + ept / 2];
+        }
+
+        // __syncthreads();
+
+        // if(threadIdx.y==0 && blockIdx.x==0) {
+        //     int idx = batch0+4*((laneid % 4)*16) + warpid;
+        //     idx = idx + idx/pad_period*pad;
+        //     printf("%d %d %d\n", laneid, idx, idx%32);
+        // }
+        // __syncthreads();
+
+        __syncthreads();
+
+        for(int i=0; i<4; i++) {
+            for(int j=0; j<4; j++) {
+                // int x= (laneid%4) *16 + warpid*4 + i;
+                int x= (laneid%4) + warpid*4 + i*16;
+                // int index = j + 4*x;
+                int index = (laneid%4) + warpid*4 + j*16 + i * 64;
+
+                int index0 = batch0*256 + index;
+                int index1 = batch1*256 + index;
+                index0 = index0 + index0/pad_period*pad;
+                index1 = index1 + index1/pad_period*pad;
+
+                reg[i*4+j] = smem[index0];
+                reg[i*4+j+16] = smem[index1];
+                
+                // reg[i*4+j] = s_out_0[0];
+                // reg[i*4+j+16] = s_out_1[0];
+                
+                if (j != 0) {
+                    rotate(reg[i*4+j], x * j, 256);
+                    rotate(reg[i*4+j+16], x * j, 256);
+                }
+            }
         }
     }
 
@@ -197,8 +265,10 @@ ThunderFFT_kernel_reg<half, 256, 16, false>(vec2_t<half>* __restrict__ reg, vec2
             reg[i*4+j] = s_out_0[index_pad + j*(64+4)];
             reg[i*4+j+16] = s_out_1[index_pad + j*(64+4)];
             
-            rotate(reg[i*4+j], -index * j, 256);
-            rotate(reg[i*4+j+16], -index * j, 256); 
+            if (j != 0) {
+                rotate(reg[i*4+j], -index * j, 256);
+                rotate(reg[i*4+j+16], -index * j, 256);
+            }
         }
     }
 
@@ -232,13 +302,17 @@ ThunderFFT_smem2reg_N256(vec2_t<T>* __restrict__ reg,
     int warpid = threadIdx.y;
     int ept = 32; // N * batch / (threads_per_warp * warps_per_block)
 
-    for (int i = 0; i < ept / 2; i++) {
-        int col0 = (laneid/4) + warpid * 16;
-        int col1 = (laneid/4+8) + warpid * 16;
-        int row= (i * 4 + (laneid % 4));
+    int batch0 = (laneid/4);
+    int batch1 = (laneid/4+8);
 
-        int idx0 = col0*64+row;
-        int idx1 = col1*64+row;
+    for (int i = 0; i < ept / 2; i++) {
+        int idx = i*4 + (laneid % 4) + warpid * 64;
+        if constexpr( !sL::reversed ) {
+            idx = reverse_bit_groups<2,8>(idx);
+        }
+
+        int idx0 = batch0*256+idx;
+        int idx1 = batch1*256+idx;
         idx0 = idx0 + idx0/sL::pad_period*sL::pad;
         idx1 = idx1 + idx1/sL::pad_period*sL::pad;
         idx0 = idx0 * sL::elem_stride;
@@ -247,6 +321,8 @@ ThunderFFT_smem2reg_N256(vec2_t<T>* __restrict__ reg,
         reg[i] = smem[idx0];
         reg[i + ept / 2] = smem[idx1];
     }
+
+
 }
 
 
@@ -267,7 +343,9 @@ ThunderFFT_reg2smem_N256(vec2_t<T>* __restrict__ smem,
     auto s_out_0 = smem + (laneid/4) * (sL::batch_stride + sL::batch_stride/sL::pad_period * sL::pad);
     auto s_out_1 = smem + (laneid/4+8) * (sL::batch_stride + sL::batch_stride/sL::pad_period * sL::pad);
     for(int i=0; i<4; i++) {
-        int index_i = (laneid%4) + i*4 + warpid*16;
+        int index_i = (laneid%4) + i*16 + warpid*4;
+        // int index_i = (laneid%4) *16 + warpid*4 + i;
+
 
         for(int j=0; j<4; j++) {
             int index = (index_i + j*64) * sL::elem_stride;
@@ -277,16 +355,5 @@ ThunderFFT_reg2smem_N256(vec2_t<T>* __restrict__ smem,
 
         }
     }
-
-    // __syncthreads();
-    // if(threadIdx.x ==0 && threadIdx.y==0 && blockIdx.x==0) {
-    //     for(int i=0; i<16; i++) {
-    //         for(int j=0; j<16; j++) {
-    //             printf("%f %f\n", smem[i*17+j].x, smem[i*17+j].y);
-    //         }
-    //     }
-    //     printf("-----------\n");
-    // }
-    // __syncthreads();
 }
 }

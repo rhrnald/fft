@@ -16,6 +16,7 @@ __device__ __forceinline__ void fill_reg_b(float b[], int stride_log2, int strid
     int j0 = (laneid % 4) * 2; // row (2j, 2j+1)
     int j1 = (laneid % 4) * 2 + 1;
 
+
     if (stage == 0) {
         j0=f(j0);
         j1=f(j1);

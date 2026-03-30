@@ -100,11 +100,9 @@ __device__ __forceinline__ void make_reg_b_precompute(vec2_t<half> *W) {
 
     if(!forward) twiddle += 32*36;
 
-    
-
     if constexpr (N==64 || N==128) {
         for(int i=0; i<28; i++) W[i] = twiddle[(threadIdx.x%32) + 32*i];
-    } else if constexpr (N==1024) {
+    } else if constexpr (N==256 || N==1024) {
         for(int i=0; i<36; i++) W[i] = twiddle[(threadIdx.x%32) + 32*i];
     }
 }
@@ -237,26 +235,6 @@ __device__ void fft_kernel_r64_b16(vec2_t<half>* reg, vec2_t<half>* W)
             }
         }
     }
-}
-template <typename T> __device__ void swap_vals(T &a, T &b) {
-    T tmp = a;
-    a = b;
-    b = tmp;
-}
-
-template <typename T> __device__ void swap_thread_data(T *thread_data) {
-    swap_vals(thread_data[1], thread_data[4]);
-    swap_vals(thread_data[17], thread_data[20]);
-    swap_vals(thread_data[2], thread_data[8]);
-    swap_vals(thread_data[18], thread_data[24]);
-    swap_vals(thread_data[3], thread_data[12]);
-    swap_vals(thread_data[19], thread_data[28]);
-    swap_vals(thread_data[6], thread_data[9]);
-    swap_vals(thread_data[22], thread_data[25]);
-    swap_vals(thread_data[7], thread_data[13]);
-    swap_vals(thread_data[23], thread_data[29]);
-    swap_vals(thread_data[11], thread_data[14]);
-    swap_vals(thread_data[27], thread_data[30]);
 }
 
 template <bool forward>

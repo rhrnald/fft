@@ -4,6 +4,16 @@ inline constexpr unsigned LOG2P_builtin = [] {
     return __builtin_ctz(N); // pow2에서 log2(N)과 동일
 }();
 
+template <unsigned int Bits>
+__device__ __forceinline__ int reverse_bits(int x) {
+    int result = 0;
+    #pragma unroll
+    for (unsigned int i = 0; i < Bits; ++i) {
+        result = (result << 1) | ((x >> i) & 1);
+    }
+    return result;
+}
+
 template <int r, int N>
 __device__ __forceinline__ int reverse_bit_groups(int x) {
     int num_groups = N / r;
@@ -129,4 +139,25 @@ __host__ __device__ constexpr int pad(int N) {
     //     default:  return -1;  // not a power of two
     // }
     return N / 16;
+}
+
+template <typename T> __device__ void swap_vals(T &a, T &b) {
+    T tmp = a;
+    a = b;
+    b = tmp;
+}
+
+template <typename T> __device__ void swap_thread_data(T *thread_data) {
+    swap_vals(thread_data[1], thread_data[4]);
+    swap_vals(thread_data[17], thread_data[20]);
+    swap_vals(thread_data[2], thread_data[8]);
+    swap_vals(thread_data[18], thread_data[24]);
+    swap_vals(thread_data[3], thread_data[12]);
+    swap_vals(thread_data[19], thread_data[28]);
+    swap_vals(thread_data[6], thread_data[9]);
+    swap_vals(thread_data[22], thread_data[25]);
+    swap_vals(thread_data[7], thread_data[13]);
+    swap_vals(thread_data[23], thread_data[29]);
+    swap_vals(thread_data[11], thread_data[14]);
+    swap_vals(thread_data[27], thread_data[30]);
 }
