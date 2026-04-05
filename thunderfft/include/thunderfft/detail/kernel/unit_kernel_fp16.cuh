@@ -102,7 +102,7 @@ __device__ __forceinline__ void make_reg_b_precompute(vec2_t<half> *W) {
 
     if constexpr (N==64 || N==128) {
         for(int i=0; i<28; i++) W[i] = twiddle[(threadIdx.x%32) + 32*i];
-    } else if constexpr (N==256 || N==1024) {
+    } else if constexpr (N==256 || N==1024 || N==2048 || N==4096) {
         for(int i=0; i<36; i++) W[i] = twiddle[(threadIdx.x%32) + 32*i];
     }
 }

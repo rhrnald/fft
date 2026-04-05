@@ -14,11 +14,11 @@ void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch);
 #endif
 
 #ifndef THUNDERFFT_PROFILE_N
-#define THUNDERFFT_PROFILE_N 256
+#define THUNDERFFT_PROFILE_N 1024
 #endif
 
 #ifndef THUNDERFFT_PROFILE_FLOAT
-#define THUNDERFFT_PROFILE_FLOAT 0
+#define THUNDERFFT_PROFILE_FLOAT 1
 #endif
 
 #ifndef THUNDERFFT_PROFILE_HALF
@@ -34,7 +34,7 @@ template <long long N> int test() {
 
     for (int i = 0; i < N * batch; ++i) {
         h_input[i].x = sinf(2 * M_PI * (i % N)/N)/sqrt(N);
-        // h_input[i].x = (i % N) / sqrt(N);
+        // h_input[i].x = (i % 4096);
         h_input[i].y = 0.0f;
 
         h_input_half[i] = make_half2(h_input[i].x, h_input[i].y);
@@ -56,9 +56,10 @@ template <long long N> int test() {
     thunderfft::ThunderFFTFinalize<half>();
     #endif
 
-    // for(int i=0; i<1024; i++) {
-    //     printf("%f %f\n", h_output[i].x, h_output[i].y);
+    // for(int i=0; i<4096; i++) {
+    //     printf("%f %f, ", h_output[i].x, h_output[i].y);
     //     // printf("%f %f\n", h_input[i].x, h_input[i].y);
+    //     if((i+1)%64==0) printf("\n");
     // }
 
     free(h_input);
@@ -68,13 +69,13 @@ template <long long N> int test() {
 }
 
 int main() {
-    // test<64>();
-    // test<128>();
+    test<64>();
+    test<128>();
     test<256>();
-    // test<512>();
-    // test<1024>();
+    test<512>();
+    test<1024>();
     // test<2048>();
-    // test<4096>();
+    test<4096>();
 
     stat::set_title("FFT benchmark results");
     stat::print_table();

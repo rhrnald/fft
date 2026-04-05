@@ -79,18 +79,13 @@ ThunderFFT_kernel_reg<float, 1024, 1, false>(vec2_t<float>* __restrict__ reg, ve
 template<>
 __device__ __forceinline__ void
 ThunderFFT_kernel_reg<half, 1024, 1, true>(vec2_t<half>* __restrict__ reg, vec2_t<half>* W_reg, void *workspace) {
-    int laneid = threadIdx.x & 31;
-    int block_id = blockIdx.x;
-
+    int laneid = threadIdx.x;
     int ept = 32; // N * batch / threads_per_warp
-
-
 
     vec2_t<half>* smem = (vec2_t<half>*)workspace;
 
     thunderfft::unit_fp16::fft_kernel_r64_b16<true>(reg, W_reg);
 
-    // using L_in = layout_t<64, 16, 1, 64, 32, 1, false>;
     using L_in = layout_t<64, 16, 1, 64, 32, 1, false>;
     ThunderFFT_reg2smem_N64<half, L_in>(smem, reg);
 
@@ -98,69 +93,32 @@ ThunderFFT_kernel_reg<half, 1024, 1, true>(vec2_t<half>* __restrict__ reg, vec2_
 
     for(int i=0; i<ept/2; i++) {
         int row = i%4 * 4 + (laneid%4);
-        // int rev_row = reverse_bit_groups<2,4>(row);
         int rev_row = i%4 + (laneid%4)*4;
-
-        // int col0 = laneid/4 + (i/4) * 16;
-        // int col1 = col0 + 8;
-
-        // int col0 = (laneid/4) %4 + (laneid/16)*16 + (i/4) * 4;
-        // int col1 = col0 + 32;
-
+        // int col0 = (laneid/4) %4 + (laneid/16)*8 + (i/4) * 16;
+        // int col1 = col0 + 4;
         
-        // int col0 = ((laneid/4) %4)*16 + (laneid/16)*2 + (i/4) * 4;
-        // int col1 = col0 + 1;
-
-        
-        int col0 = (laneid/4) %4 + (laneid/16)*8 + (i/4) * 16;
-        int col1 = col0 + 4;
-        
-        // int col0 = (laneid/4) %2 + (laneid/8)*8 + (i/4) * 2;
-        // int col1 = col0 + 32;
+        int col0 = (laneid/4) %2 + (laneid/8) * 8 + (i/4) * 2;
+        int col1 = col0 + 32;
 
         int index0 = row * 64 + col0; index0 += index0/L_in::pad_period * L_in::pad;
         int index1 = row * 64 + col1; index1 += index1/L_in::pad_period * L_in::pad;
 
         reg[i] = smem[index0];
         reg[i+ept/2] = smem[index1];
-        
         rotate(reg[i], col0 * rev_row, 1024);
         rotate(reg[i+ept/2], col1 * rev_row, 1024);
-        // rotate(reg[i], col0 * rev_row, 1024);
-        // rotate(reg[i+ept/2], col1 * rev_row, 1024);
-
-        // auto W_precompute = ThunderFFT_get_twiddle<half>();
-        // reg[i] = cmul(reg[i], W_precompute[(-col0 * rev_row) & (1024-1)]);
-        // reg[i+ept/2] = cmul(reg[i+ept/2], W_precompute[(-col1 * rev_row) & (1024-1)]);
 
         
-        // half2 tmp = __half2(0.5f,0.3f);
-        // reg[i] = cmul(reg[i], tmp);
-        // reg[i+ept/2] = cmul(reg[i+ept/2], tmp);
-
         // __syncthreads();
         // if(blockIdx.x==0) {
-        //     printf("%d,%d,%d\n", threadIdx.x, index0, index0%32);
-        // }
-        // __syncthreads();
-        // if(threadIdx.x==0 && blockIdx.x==0) {
-        //     printf("-----\n");
+        //     if(i==0) {
+        //         printf("%d %d %d\n", laneid, index0, index0%32);
+        //     }
         // }
         // __syncthreads();
     }
 
-
-
     thunderfft::unit_fp16::fft_kernel_r16_b64<true>(reg, W_reg);
-
-    // __syncthreads();
-    // if(threadIdx.x<8 && threadIdx.y==0 && blockIdx.x==0) {
-    //     for(int i=0; i<ept; i++) {
-    //         printf("%d reg[%d]: %f %f\n", threadIdx.x, i, __half2float(reg[i].x), __half2float(reg[i].y));
-    //     }
-    //     printf("---------------\n");
-    // }
-    // __syncthreads();
 }
 
 template<>
@@ -208,7 +166,6 @@ __device__ __forceinline__ void
 ThunderFFT_smem2reg_N1024(vec2_t<T>* __restrict__ reg,
                     const vec2_t<T>* __restrict__ smem) {
     int laneid = threadIdx.x & 31;
-    int block_id = blockIdx.x;
     int ept = 32;
 
     auto *s_0 = (smem+(laneid/4)*(64+64/sL::pad_period*sL::pad)*sL::elem_stride);
@@ -272,9 +229,14 @@ ThunderFFT_reg2smem_N1024(vec2_t<T>* __restrict__ smem,
         //     col1 = col0 + 4;
         // }
 
-        
-        int col0 = (laneid/4) %4 + (laneid/16)*8 + (i/4) * 16;
-        int col1 = col0 + 4;
+        int col0, col1;
+        if constexpr (std::is_same_v<T, float>) {
+             col0 = (laneid/4) %4 + (laneid/16)*8 + (i/4) * 16;
+             col1 = col0 + 4;
+        } else {
+            col0 = (laneid/4) %2 + (laneid/8) * 8 + (i/4) * 2;
+            col1 = col0 + 32;
+        }
         
         // int col0 = ((laneid/4) %4)*16 + (laneid/16)*2 + (i/4) * 4;
         // int col1 = col0 + 1;
@@ -289,6 +251,13 @@ ThunderFFT_reg2smem_N1024(vec2_t<T>* __restrict__ smem,
 
         smem[idx0] = reg[i];
         smem[idx1] = reg[i+ept/2];
+        
+        // __syncthreads();
+        // if(blockIdx.x==0) {
+        //     if(i==0) {
+        //         printf("%d %d %d %d %d\n", laneid, idx0, idx0%32, sL::pad_period, sL::pad);
+        //     }
+        // }
     }
 
     // __syncthreads();

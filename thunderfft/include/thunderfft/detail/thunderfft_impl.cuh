@@ -16,7 +16,7 @@ inline constexpr int batch_per_block =
     (N == 64)   ? 16 :
     (N == 128)  ? 8  :
     (N == 256)  ? 16 :
-    (N == 512)  ? 8  :
+    (N == 512)  ? 2  :
     (N == 1024 || N == 4096) ? 1 :
     (N == 2048) ? 2 :
     0;
@@ -24,7 +24,8 @@ inline constexpr int batch_per_block =
 template <int N>
 inline constexpr int warp_per_block =
     (N == 64 || N == 128 || N == 1024) ? 1 :
-    (N == 256 || N == 512 || N == 2048 || N == 4096) ? 4 :
+    (N == 256 || N == 2048 || N == 4096) ? 4 :
+    (N == 512) ? 1 :
     0;
 
 constexpr int threads_per_warp = 32;

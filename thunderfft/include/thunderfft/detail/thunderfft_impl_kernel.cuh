@@ -36,5 +36,6 @@ inline void ThunderFFT_global(vec2_t<T>* d_input,
 #include "kernel/shared_kernel_n64_b16.cuh"
 #include "kernel/shared_kernel_n128_b8.cuh"
 #include "kernel/shared_kernel_n256_b16.cuh"
+#include "kernel/shared_kernel_n512_b2.cuh"
 #include "kernel/shared_kernel_n1024_b1.cuh"
-#include "kernel/shared_kernel_n512_n2048_n4096_b4.cuh"
+#include "kernel/shared_kernel_n4096_b1.cuh"
