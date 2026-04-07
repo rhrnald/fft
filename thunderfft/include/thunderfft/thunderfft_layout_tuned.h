@@ -10,25 +10,26 @@ struct bench_layout {
 
 template <int BPB>
 struct bench_layout<half, 64, BPB> {
-    using L_in = layout_t<64, BPB, 1, 64, 64, 4, true>;
+    using L_in = layout_t<64, BPB, 1, 64, 16, 1, false>;
     using L_out = layout_t<64, BPB, 1, 64, 16, 1, false>;
 };
 
 template <int BPB>
 struct bench_layout<float, 64, BPB> {
-    using L_in = layout_t<64, BPB, 1, 64, 64, 4, true>;
+    using L_in = layout_t<64, BPB, 1, 64, 16, 1, false>;
     using L_out = layout_t<64, BPB, 1, 64, 16, 1, false>;
 };
 
 template <int BPB>
 struct bench_layout<half, 128, BPB> {
-    using L_in = layout_t<128, BPB, 1, 128, 64, 4, true>;
+    using L_in = layout_t<128, BPB, 1, 128, 32, 1, false>;
     using L_out = layout_t<128, BPB, 1, 128, 16, 1, false>;
 };
 
 template <int BPB>
 struct bench_layout<float, 128, BPB> {
-    using L_in = layout_t<128, BPB, 1, 128, 64, 4, true>;
+    // using L_in = layout_t<128, BPB, 1, 128, 64, 4, true>;
+    using L_in = layout_t<128, BPB, 1, 128, 32, 1, false>;
     using L_out = layout_t<128, BPB, 1, 128, 16, 1, false>;
 };
 
@@ -73,14 +74,14 @@ struct bench_layout<float, 1024, BPB> {
 
 template <int BPB>
 struct bench_layout<half, 2048, BPB> {
-    using L_in = layout_t<2048, BPB, 1, 2048, 16, 1, false>;
-    using L_out = layout_t<2048, BPB, 1, 2048, 16, 1, false>;
+    using L_in = layout_t<2048, BPB, 1, 2048, 32, 1, false>;
+    using L_out = layout_t<2048, BPB, 1, 2048, 64, 1, false>;
 };
 
 template <int BPB>
 struct bench_layout<float, 2048, BPB> {
-    using L_in = layout_t<2048, BPB, 1, 2048, 16, 1, false>;
-    using L_out = layout_t<2048, BPB, 1, 2048, 16, 1, false>;
+    using L_in = layout_t<2048, BPB, 1, 2048, 64, 1, false>;
+    using L_out = layout_t<2048, BPB, 1, 2048, 128, 1, false>;
 };
 
 template <int BPB>

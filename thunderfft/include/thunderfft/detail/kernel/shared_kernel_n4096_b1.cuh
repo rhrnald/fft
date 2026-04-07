@@ -98,18 +98,7 @@ ThunderFFT_kernel_reg<float, 4096, 1, true>(vec2_t<float>* __restrict__ reg,
         rotate(reg[i + ept / 2], col1 * row, 4096);
     }
 
-    // __syncthreads();
-    // for(int i=0; i<32; i++) {
-    //     if(blockIdx.x==0 && threadIdx.x==i && threadIdx.y ==0){
-    //         printf("%d : ", i);
-    //         for(int j=0; j<32; j++) {
-    //             printf("%f, %f; ", reg[j].x, reg[j].y);
-    //         }
-    //         printf("\n");
-    //     }
-    //     __syncthreads();
-    // }
-    // __syncthreads();
+
 
     thunderfft::unit::fft_kernel_r64_b16<true>((float*)reg);
 

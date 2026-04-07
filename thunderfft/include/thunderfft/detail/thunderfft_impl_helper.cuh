@@ -17,11 +17,18 @@ ThunderFFT_gmem2smem(vec2_t<T>* __restrict__ smem,
             int smem_idx = i * batch_stride + j * elem_stride;
             smem_idx = smem_idx + smem_idx/pad_period * pad;
 
+            vec2_t<T> value;
             if constexpr(sL::reversed) {
-                smem[smem_idx] = gmem[i * N + reverse_bit_groups<2,LOG2P_builtin<N>>(j)];
+                value = gmem[i * N + reverse_bit_groups<2,LOG2P_builtin<N>>(j)];
             } else {
-                smem[smem_idx] = gmem[i * N + j];
+                value = gmem[i * N + j];
             }
+
+            // if constexpr (std::is_same_v<T, float>) {
+            //     value.x = __uint_as_float(__float_as_uint(value.x) + 0x1000u);
+            //     value.y = __uint_as_float(__float_as_uint(value.y) + 0x1000u);
+            // }
+            smem[smem_idx] = value;
               // s_in[i * (N+pad)+ j] = d_input[b * N * batch_per_block + i * N + j];
         }
     }

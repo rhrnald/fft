@@ -34,7 +34,7 @@ template <long long N> int test() {
 
     for (int i = 0; i < N * batch; ++i) {
         h_input[i].x = sinf(2 * M_PI * (i % N)/N)/sqrt(N);
-        // h_input[i].x = (i % 4096);
+        // h_input[i].x = (i % 2048);
         h_input[i].y = 0.0f;
 
         h_input_half[i] = make_half2(h_input[i].x, h_input[i].y);
@@ -56,10 +56,10 @@ template <long long N> int test() {
     thunderfft::ThunderFFTFinalize<half>();
     #endif
 
-    // for(int i=0; i<4096; i++) {
+    // for(int i=0; i<2048; i++) {
     //     printf("%f %f, ", h_output[i].x, h_output[i].y);
     //     // printf("%f %f\n", h_input[i].x, h_input[i].y);
-    //     if((i+1)%64==0) printf("\n");
+    //     if((i+1)%32==0) printf("\n");
     // }
 
     free(h_input);
@@ -74,7 +74,7 @@ int main() {
     test<256>();
     test<512>();
     test<1024>();
-    // test<2048>();
+    test<2048>();
     test<4096>();
 
     stat::set_title("FFT benchmark results");

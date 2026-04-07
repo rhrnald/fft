@@ -105,7 +105,7 @@ ThunderFFT_smem2reg_N128(vec2_t<T>* __restrict__ reg,
         int idx_1 = idx_0 + 64;
 
         if constexpr( !sL::reversed ) {
-            idx_0 = reverse_bit_groups<2,6>(idx_0)*2;
+            idx_0 = (i/4)*2 + (i%4)*8 + (laneid % 4) * 32;
             idx_1 = idx_0+1;
         }
 

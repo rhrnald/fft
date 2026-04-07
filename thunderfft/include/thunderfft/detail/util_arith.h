@@ -78,6 +78,7 @@ __device__ __forceinline__ void rotate(vec2_t<half>& val, int index, int N) {
 
     half2 W = __floats2half2_rn(__cosf(angle_f), __sinf(angle_f));
     // half2 W = __floats2half2_rn(angle_f, angle_f + pi/2);
+    // half2 W = __floats2half2_rn(1.5f, 2.3f);
     val = cmul(val, W);
 }
 
@@ -127,6 +128,7 @@ constexpr int pad_h(int N) {
     //     case 4096: return 256;
     //     default:  return -1; // power of two 아닌 경우
     // }
+    if(N == 2048) return N/8 + N/64;
     return N / 16;
 }
 

@@ -119,6 +119,7 @@ static __device__ __forceinline__ void mma_m16n8k8_tf32_f32_rowcol(float d[4], c
     auto a3 = __float_as_uint(a[3]);
     auto b0 = __float_as_uint(b[0]);
     auto b1 = __float_as_uint(b[1]);
+
     asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32 "
                  "{%0, %1, %2, %3}, "      // D (also C)
                  "{%4, %5, %6, %7}, "      // A (tf32 in .b32 regs)
@@ -131,6 +132,7 @@ static __device__ __forceinline__ void mma_m16n8k8_tf32_f32_rowcol(float d[4], c
     //     printf("%d %f %f %f %f %f %f %f %f %f %f\n", threadIdx.x, a[0], a[1],
     //     a[2], a[3], b[0], b[1], d[0], d[1], d[2], d[3]);
     // }
+
 }
 
 template <bool forward>
@@ -179,8 +181,9 @@ __device__ void fft_kernel_r64_b16(float* reg)
             const int i_perm = ((j / stride) / 2 * 2) % radix;
             const int k      = j % stride;
 
-            if( _j % ( 1<< (2-i)) == 0)
+            if( _j % ( 1<< (2-i)) == 0) {
                 fill_reg_b<forward>(reg_frag_b, i * 2, stride, i_perm, j_perm, k, i);
+            }
 
             mma_m16n8k8_tf32_f32_rowcol(reg_frag_d, reg_frag_a, reg_frag_b, reg_frag_zero);
 
