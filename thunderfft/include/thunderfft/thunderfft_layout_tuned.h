@@ -55,7 +55,7 @@ struct bench_layout<half, 512, BPB> {
 template <int BPB>
 struct bench_layout<float, 512, BPB> {
     using L_in = layout_t<512, BPB, 1, 512, 16, 1, false>;
-    using L_out = layout_t<512, BPB, 1, 512, 8, 1, false>;
+    using L_out = layout_t<512, BPB, 1, 512, 16, 1, false>;
 };
 
 

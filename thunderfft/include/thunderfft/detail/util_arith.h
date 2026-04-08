@@ -128,7 +128,9 @@ constexpr int pad_h(int N) {
     //     case 4096: return 256;
     //     default:  return -1; // power of two 아닌 경우
     // }
+    if(N == 512) return N/8;
     if(N == 2048) return N/8 + N/64;
+    if(N == 4096) return N/16+16;
     return N / 16;
 }
 
