@@ -408,7 +408,6 @@ __device__ void fft_kernel_r16_b64(vec2_t<half>* reg, vec2_t<half>* W)
                 //         printf("%d %d %d %f %f %f %f\n", threadIdx.x, i, _j, a1, a2, b1, b2);
                 // }
             }
-            __syncthreads();
 
             auto reg_frag_b = (unsigned int *)W;
 
