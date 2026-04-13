@@ -22,7 +22,7 @@ void baseline_fft(float2 *h_input, float2 *h_output, int N, int batch);
 #endif
 
 #ifndef THUNDERFFT_PROFILE_HALF
-#define THUNDERFFT_PROFILE_HALF 1
+#define THUNDERFFT_PROFILE_HALF 0
 #endif
 
 template <long long N> int test() {
@@ -69,13 +69,13 @@ template <long long N> int test() {
 }
 
 int main() {
-    test<64>();
+    // test<64>();
     test<128>();
-    test<256>();
-    test<512>();
-    test<1024>();
-    test<2048>();
-    test<4096>();
+    // test<256>();
+    // test<512>();
+    // test<1024>();
+    // test<2048>();
+    // test<4096>();
 
     stat::set_title("FFT benchmark results");
     stat::print_table();

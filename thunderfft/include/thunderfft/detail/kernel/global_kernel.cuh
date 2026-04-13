@@ -47,7 +47,6 @@ __global__ void ThunderFFT_global_kernel(const vec2_t<T>* __restrict__ d_input,
     __syncthreads();
 
     ThunderFFT_smem2gmem<T, L_out>(d_output + blockIdx.x * BPB * N, s_in);
-    __syncthreads();
 
 }
 

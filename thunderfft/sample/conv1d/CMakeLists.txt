@@ -1,0 +1,38 @@
+add_executable(thff_conv1d
+  ${CMAKE_CURRENT_SOURCE_DIR}/main.cu
+)
+
+set(THFF_CONV1D_TILES_PER_WARP 1 CACHE STRING "Logical FFT blocks handled per warp (compile-time constant)")
+target_compile_definitions(thff_conv1d PRIVATE
+  THFF_CONV1D_TILES_PER_WARP=${THFF_CONV1D_TILES_PER_WARP}
+)
+
+target_link_libraries(thff_conv1d PRIVATE thunderfft CUDA::cudart CUDA::cufft)
+
+target_compile_options(thff_conv1d PRIVATE
+  $<$<COMPILE_LANGUAGE:CUDA>:-O3 -lineinfo>
+  $<$<COMPILE_LANGUAGE:CXX>:-O3>
+)
+
+add_executable(thff_conv1d_fullfft4096
+  ${CMAKE_CURRENT_SOURCE_DIR}/conv1d_fullfft_l4096_thunder.cu
+)
+target_link_libraries(thff_conv1d_fullfft4096 PRIVATE thunderfft CUDA::cudart CUDA::cufft)
+target_compile_options(thff_conv1d_fullfft4096 PRIVATE
+  $<$<COMPILE_LANGUAGE:CUDA>:-O3 -lineinfo>
+  $<$<COMPILE_LANGUAGE:CXX>:-O3>
+)
+
+find_library(CUDNN_LIB cudnn)
+if(CUDNN_LIB)
+  add_executable(thff_conv1d_compare
+    ${CMAKE_CURRENT_SOURCE_DIR}/conv1d_compare_cudnn_thunder.cu
+  )
+  target_link_libraries(thff_conv1d_compare PRIVATE CUDA::cudart ${CUDNN_LIB})
+  target_compile_options(thff_conv1d_compare PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:-O3 -lineinfo>
+    $<$<COMPILE_LANGUAGE:CXX>:-O3>
+  )
+else()
+  message(WARNING "cudnn library not found; thff_conv1d_compare target will not be built")
+endif()
