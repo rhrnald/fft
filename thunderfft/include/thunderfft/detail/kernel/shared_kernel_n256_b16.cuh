@@ -142,7 +142,7 @@ ThunderFFT_kernel_reg<float, 256, 16, false>(vec2_t<float>* __restrict__ reg, ve
         auto t0 = a + c;
         auto t1 = a - c;
         auto t2 = b + d;
-        auto t3 = b - d; t3 = {t3.y, -t3.x}; // multiply by -i
+        auto t3 = b - d; t3 = {-t3.y, t3.x}; // multiply by -i
 
         reg[4 * i + 0] = t0 + t2;
         reg[4 * i + 1] = t1 + t3;
@@ -251,23 +251,42 @@ ThunderFFT_kernel_reg<half, 256, 16, false>(vec2_t<half>* __restrict__ reg, vec2
     vec2_t<half> *smem = (vec2_t<half>*)workspace;
     thunderfft::unit_fp16::fft_kernel_r64_b16<false>((vec2_t<half>*)reg, W);
 
-    thunderfft::unit_fp16::reg2smem(reg, smem+((laneid/4) + warpid * 16)*(64+4), smem + ((laneid/4+8) + warpid*16)*(64+4), 1);
+    {
+        const int pad_period=64, pad=1;
+        int batch0 = (laneid/4);
+        int batch1 = (laneid/4+8);
 
-    __syncthreads();
+        for (int i = 0; i < ept / 2; i++) {
+            int idx = i + warpid * 16 + (laneid % 4)*64;
 
-    auto s_out_0 = smem + (laneid/4) * (256 + 16);
-    auto s_out_1 = smem + (laneid/4+8) * (256 + 16);
+            int idx0 = batch0*256+idx;
+            int idx1 = batch1*256+idx;
+            idx0 = idx0 + idx0/pad_period*pad;
+            idx1 = idx1 + idx1/pad_period*pad;
 
-    for(int i=0; i<4; i++) {
-        int index_pad = (laneid%4) + i*4 + warpid*17;
-        int index = (laneid%4) + i*4 + warpid*16;
-        for(int j=0; j<4; j++) {
-            reg[i*4+j] = s_out_0[index_pad + j*(64+4)];
-            reg[i*4+j+16] = s_out_1[index_pad + j*(64+4)];
-            
-            if (j != 0) {
-                rotate(reg[i*4+j], -index * j, 256);
-                rotate(reg[i*4+j+16], -index * j, 256);
+            smem[idx0] = reg[i];
+            smem[idx1] = reg[i + ept / 2];
+        }
+
+        __syncthreads();
+
+        for(int i=0; i<4; i++) {
+            for(int j=0; j<4; j++) {
+                int x= (laneid%4) + warpid*4 + i*16;
+                int index = (laneid%4) + warpid*4 + j*16 + i * 64;
+
+                int index0 = batch0*256 + index;
+                int index1 = batch1*256 + index;
+                index0 = index0 + index0/pad_period*pad;
+                index1 = index1 + index1/pad_period*pad;
+
+                reg[i*4+j] = smem[index0];
+                reg[i*4+j+16] = smem[index1];
+                
+                if (j != 0) {
+                    rotate(reg[i*4+j], -x * j, 256);
+                    rotate(reg[i*4+j+16], -x * j, 256);
+                }
             }
         }
     }
@@ -282,7 +301,7 @@ ThunderFFT_kernel_reg<half, 256, 16, false>(vec2_t<half>* __restrict__ reg, vec2
         auto t0 = a + c;
         auto t1 = a - c;
         auto t2 = b + d;
-        auto t3 = b - d; t3 = {t3.y, -t3.x}; // multiply by -i
+        auto t3 = b - d; t3 = {-t3.y, t3.x}; // multiply by -i
 
         reg[4 * i + 0] = t0 + t2;
         reg[4 * i + 1] = t1 + t3;

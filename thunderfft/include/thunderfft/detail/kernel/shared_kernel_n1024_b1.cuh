@@ -140,13 +140,10 @@ ThunderFFT_kernel_reg<half, 1024, 1, false>(vec2_t<half>* __restrict__ reg, vec2
 
     for(int i=0; i<ept/2; i++) {
         int row = i%4 * 4 + (laneid%4);
-        int rev_row = i%4 + (laneid%4)*4;
+        int rev_row = reverse_bit_groups<2,4>(row);
 
-        // int col0 = (laneid/4) %2 + (laneid/8)*8 + (i/4) * 2;
-        // int col1 = col0 + 32;
-        
-        int col0 = (laneid/4) %4 + (laneid/16)*8 + (i/4) * 16;
-        int col1 = col0 + 4;
+        int col0 = (laneid/4) %2 + (laneid/8) * 8 + (i/4) * 2;
+        int col1 = col0 + 32;
 
         int index0 = row * 64 + col0; index0 += index0/L_in::pad_period * L_in::pad;
         int index1 = row * 64 + col1; index1 += index1/L_in::pad_period * L_in::pad;
