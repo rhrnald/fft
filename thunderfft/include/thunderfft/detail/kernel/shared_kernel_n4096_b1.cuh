@@ -255,7 +255,7 @@ ThunderFFT_kernel_reg<half, 4096, 1, false>(vec2_t<half>* __restrict__ reg,
 
     #pragma unroll
     for (int i = 0; i < ept / 2; ++i) {
-        int row = i * 4 + (laneid & 3);
+        int row = (laneid & 3) * 16 + i / 4 + (i % 4) * 4;
         int col0 = warpid * 16 + (laneid >> 2);
         int col1 = col0 + 8;
         reg[i] = smem[detail::smem_index_4096(row, col0)];
@@ -265,26 +265,6 @@ ThunderFFT_kernel_reg<half, 4096, 1, false>(vec2_t<half>* __restrict__ reg,
     }
 
     thunderfft::unit_fp16::fft_kernel_r64_b16<false>(reg, W_precompute);
-
-    #pragma unroll
-    for (int i = 0; i < ept / 2; ++i) {
-        int row = i * 4 + (laneid & 3);
-        int col0 = warpid * 16 + (laneid >> 2);
-        int col1 = col0 + 8;
-        smem[detail::smem_index_4096(row, col0)] = reg[i];
-        smem[detail::smem_index_4096(row, col1)] = reg[i + ept / 2];
-    }
-
-    __syncthreads();
-
-    #pragma unroll
-    for (int i = 0; i < ept / 2; ++i) {
-        int col = i + (laneid & 3) * 16;
-        int row0 = warpid * 16 + (laneid >> 2);
-        int row1 = row0 + 8;
-        reg[i] = smem[detail::smem_index_4096(row0, col)];
-        reg[i + ept / 2] = smem[detail::smem_index_4096(row1, col)];
-    }
 }
 
 template <typename T, typename sL>
